@@ -1,0 +1,105 @@
+name: Build J-Slice
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows (VST3 + Standalone)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache JUCE download
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: juce-8.0.9-${{ runner.os }}
+
+      - name: Configure
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build plugin and tests
+        run: cmake --build build --config Release --parallel 4 --target JSlice_VST3 JSlice_Standalone JSliceTests
+
+      - name: Run tests
+        shell: bash
+        run: ./build/JSliceTests_artefacts/Release/JSliceTests.exe test-output
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "package/J-Slice"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item -Recurse "build/JSlice_artefacts/Release/VST3/J-Slice.vst3" "$out/"
+          Copy-Item "build/JSlice_artefacts/Release/Standalone/J-Slice.exe" "$out/"
+          Copy-Item "docs/INSTALL-WINDOWS.txt" "$out/LISEZ-MOI.txt"
+          New-Item -ItemType Directory -Force -Path "$out/demo-loops" | Out-Null
+          Copy-Item "test-output/*.wav" "$out/demo-loops/"
+          Compress-Archive -Path "$out/*" -DestinationPath "J-Slice-Windows.zip" -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: J-Slice-Windows
+          path: J-Slice-Windows.zip
+
+      - name: Publish "latest" download (main branch)
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest J-Slice-Windows.zip \
+            --title "J-Slice - latest build" \
+            --notes "Automatic build of commit ${GITHUB_SHA::7}. Unzip, copy J-Slice.vst3 to C:\\Program Files\\Common Files\\VST3, then rescan plug-ins in Ableton Live." \
+            --prerelease --target "$GITHUB_SHA"
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" J-Slice-Windows.zip --title "J-Slice $GITHUB_REF_NAME" --generate-notes || \
+          gh release upload "$GITHUB_REF_NAME" J-Slice-Windows.zip --clobber
+
+  linux-tests:
+    name: Linux (tests + pluginval)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev \
+            libxrandr-dev libxcursor-dev libxinerama-dev libxext-dev libxcomposite-dev xvfb
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --target JSlice_VST3 JSliceTests JSliceHarness
+      - name: Core tests
+        run: ./build/JSliceTests_artefacts/Release/JSliceTests test-output
+      - name: Integration harness
+        run: xvfb-run -a -s "-screen 0 1400x1000x24" ./build/JSliceHarness_artefacts/Release/JSliceHarness test-output/synthetic_break_136bpm.wav harness-output
+      - name: pluginval
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
+          unzip -q pluginval.zip
+          xvfb-run -a ./pluginval --strictness-level 10 --validate-in-process build/JSlice_artefacts/Release/VST3/J-Slice.vst3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: harness-output/*.png
