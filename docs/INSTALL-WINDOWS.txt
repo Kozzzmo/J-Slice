@@ -1,0 +1,23 @@
+J-SLICE - installation sous Windows
+===================================
+
+1. Copier le dossier "J-Slice.vst3" (tout le dossier) dans :
+       C:\Program Files\Common Files\VST3
+   (Windows demande une autorisation administrateur : accepter.)
+
+2. Ableton Live 12 : Options > Settings (Préférences) > Plug-Ins
+   - activer "Use VST3 Plug-In System Folders"
+   - cliquer sur "Rescan"
+
+3. Dans le navigateur d'Ableton : Plug-Ins > Kozzzmo > J-Slice.
+   Glisser J-Slice sur une piste MIDI (c'est un instrument).
+
+4. Charger un break : bouton BROWSE (ou LOAD, ou glisser un fichier WAV/AIFF/FLAC/MP3/OGG
+   directement sur la fenêtre du plugin), puis lancer la lecture dans Ableton.
+
+J-Slice.exe est une version autonome (sans Ableton) pour tester rapidement.
+Windows peut afficher un avertissement SmartScreen car le programme n'est pas signé :
+"Informations complémentaires" > "Exécuter quand même".
+
+Le dossier demo-loops contient des boucles générées par les tests automatiques
+à partir d'un break synthétique (pour avoir une idée des styles).
