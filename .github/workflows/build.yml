@@ -28,14 +28,25 @@ jobs:
           key: juce-8.0.9-${{ runner.os }}
 
       - name: Configure
-        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake -B build -A x64 2>&1 | tee configure.log || {
+            echo "::error title=CMake configure failed::$(tail -n 25 configure.log | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')"; exit 1; }
 
       - name: Build plugin and tests
-        run: cmake --build build --config Release --parallel 4 --target JSlice_VST3 JSlice_Standalone JSliceTests
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build --config Release --parallel 4 --target JSlice_VST3 JSlice_Standalone JSliceTests 2>&1 | tee build.log || {
+            echo "::error title=Build failed::$(grep -E 'error|Error' build.log | head -n 25 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')"; exit 1; }
 
       - name: Run tests
         shell: bash
-        run: ./build/JSliceTests_artefacts/Release/JSliceTests.exe test-output
+        run: |
+          set -o pipefail
+          ./build/JSliceTests_artefacts/Release/JSliceTests.exe test-output 2>&1 | tee tests.log || {
+            echo "::error title=Tests failed::$(grep -E 'FAIL|failure' tests.log | head -n 25 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')"; exit 1; }
 
       - name: Package
         shell: pwsh
