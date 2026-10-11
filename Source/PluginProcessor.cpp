@@ -16,9 +16,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout JSliceProcessor::createLayou
     };
     const auto& d = getStyles()[0].defaults;
 
-    l.add (pct (PID::complexity, "Complexity", 0.5f));
-    l.add (pct (PID::energy, "Energy", 0.5f));
-    l.add (pct (PID::chaos, "Chaos", 0.5f));
+    // macros : 0 = the style's own settings, 100 % = pushed to the maximum
+    l.add (pct (PID::complexity, "Complexity", 0.0f));
+    l.add (pct (PID::energy, "Energy", 0.0f));
+    l.add (pct (PID::chaos, "Chaos", 0.0f));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::style, 1 }, "Style", getStyleNames(), 0));
 
     l.add (pct (PID::density, "Density", d.density));
@@ -38,13 +39,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout JSliceProcessor::createLayou
     l.add (std::make_unique<AudioParameterInt> (ParameterID { PID::maxRepeats, 1 }, "Max repeats", 1, 4, d.maxRepeats));
     l.add (pct (PID::humanize, "Humanize", d.humanize));
 
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::bars, 1 }, "Pattern bars", StringArray { "1", "2", "4", "8" }, 2));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::fillEvery, 1 }, "Fill every", StringArray { "Off", "2 bars", "4 bars", "8 bars" }, 2));
+    l.add (std::make_unique<AudioParameterInt> (ParameterID { PID::steps, 1 }, "Pattern length (steps)", 1, kMaxSteps, 64));
+    l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::fillOn, 1 }, "Fill on", false));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::fillEvery, 1 }, "Fill every", StringArray { "Every 2 bars", "Every 4 bars", "Every 8 bars" }, 1));
     l.add (pct (PID::swing, "Swing", 0.0f));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::quantize, 1 }, "Change on next bar", true));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::seqOn, 1 }, "Sequencer on", true));
+    l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::syncOn, 1 }, "Sync to host", true));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { PID::freeBpm, 1 }, "Free tempo", NormalisableRange<float> (60.0f, 220.0f, 0.1f), 172.0f,
+                                                  AudioParameterFloatAttributes().withLabel ("BPM")));
 
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::tempoMode, 1 }, "Tempo mode", StringArray { "Repitch (vintage)", "Slice (original speed)", "Cyclic stretch (Akai)" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::tempoMode, 1 }, "Tempo mode", StringArray { "Repitch (vintage)", "Slice (original speed)", "Cyclic stretch (Akai)", "Stretch (clean)" }, 0));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { PID::cycleMs, 1 }, "Cycle length", NormalisableRange<float> (5.0f, 120.0f, 0.1f, 0.6f), 40.0f,
                                                   AudioParameterFloatAttributes().withLabel ("ms")));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { PID::pitch, 1 }, "Pitch", NormalisableRange<float> (-24.0f, 24.0f, 0.01f), 0.0f,
@@ -67,6 +72,26 @@ juce::AudioProcessorValueTreeState::ParameterLayout JSliceProcessor::createLayou
     l.add (pct (PID::reso, "Resonance", 0.2f));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::driveOn, 1 }, "Drive on", false));
     l.add (pct (PID::drive, "Drive", 0.3f));
+    l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::compOn, 1 }, "Comp on", false));
+    l.add (pct (PID::compAmt, "Squash", 0.5f));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { PID::compAtk, 1 }, "Comp attack", NormalisableRange<float> (0.1f, 50.0f, 0.01f, 0.4f), 3.0f,
+                                                  AudioParameterFloatAttributes().withLabel ("ms")));
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { PID::compRel, 1 }, "Comp release", NormalisableRange<float> (10.0f, 600.0f, 0.1f, 0.5f), 80.0f,
+                                                  AudioParameterFloatAttributes().withLabel ("ms")));
+    l.add (pct (PID::compMix, "Comp mix", 0.5f));
+    l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::dlyOn, 1 }, "Delay on", false));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::dlyTime, 1 }, "Delay time", delayTimeNames(), 3));
+    l.add (pct (PID::dlyFb, "Delay feedback", 0.4f));
+    l.add (pct (PID::dlyTone, "Delay tone", 0.55f));
+    l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::dlyPing, 1 }, "Ping-pong", true));
+    l.add (pct (PID::dlyMix, "Delay level", 0.3f));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::dlySrc, 1 }, "Delay source", StringArray { "All", "Snares only" }, 1));
+    l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::revOn, 1 }, "Reverb on", false));
+    l.add (pct (PID::revSize, "Reverb size", 0.45f));
+    l.add (pct (PID::revDamp, "Reverb damping", 0.5f));
+    l.add (pct (PID::revWidth, "Reverb width", 1.0f));
+    l.add (pct (PID::revMix, "Reverb level", 0.25f));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::revSrc, 1 }, "Reverb source", StringArray { "All", "Snares only" }, 1));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { PID::output, 1 }, "Output", NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
                                                   AudioParameterFloatAttributes().withLabel ("dB")));
 
@@ -121,10 +146,9 @@ void JSliceProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 EngineParams JSliceProcessor::currentEngineParams() const
 {
     EngineParams p;
-    const int barsIdx = (int) pv (PID::bars);
-    p.patternBars = barsIdx == 0 ? 1 : barsIdx == 1 ? 2 : barsIdx == 2 ? 4 : 8;
+    p.patternSteps = juce::jlimit (1, kMaxSteps, (int) pv (PID::steps));
     const int fe = (int) pv (PID::fillEvery);
-    p.fillEvery = fe == 0 ? 0 : fe == 1 ? 2 : fe == 2 ? 4 : 8;
+    p.fillEvery = pv (PID::fillOn) > 0.5f ? (fe == 0 ? 2 : fe == 1 ? 4 : 8) : 0;
     p.swing = pv (PID::swing);
     p.tempoMode = (int) pv (PID::tempoMode);
     p.cycleMs = pv (PID::cycleMs);
@@ -144,33 +168,53 @@ EngineParams JSliceProcessor::currentEngineParams() const
     p.reso = pv (PID::reso);
     p.driveOn = pv (PID::driveOn) > 0.5f;
     p.drive = pv (PID::drive);
+    p.compOn = pv (PID::compOn) > 0.5f;
+    p.compAmt = pv (PID::compAmt);
+    p.compAtkMs = pv (PID::compAtk);
+    p.compRelMs = pv (PID::compRel);
+    p.compMix = pv (PID::compMix);
+    p.dlyOn = pv (PID::dlyOn) > 0.5f;
+    p.dlyTime = (int) pv (PID::dlyTime);
+    p.dlyFb = pv (PID::dlyFb);
+    p.dlyTone = pv (PID::dlyTone);
+    p.dlyPing = pv (PID::dlyPing) > 0.5f;
+    p.dlyMix = pv (PID::dlyMix);
+    p.dlySrc = (int) pv (PID::dlySrc);
+    p.revOn = pv (PID::revOn) > 0.5f;
+    p.revSize = pv (PID::revSize);
+    p.revDamp = pv (PID::revDamp);
+    p.revWidth = pv (PID::revWidth);
+    p.revMix = pv (PID::revMix);
+    p.revSrc = (int) pv (PID::revSrc);
     p.outDb = pv (PID::output);
     return p;
 }
 
 GenSettings JSliceProcessor::currentGenSettings() const
 {
-    // macros : 0.5 = neutral, 0 = halves / removes, 1 = doubles
-    const float c = pv (PID::complexity) * 2.0f, e = pv (PID::energy) * 2.0f, x = pv (PID::chaos) * 2.0f;
+    // macros : 0 = the style's own detail settings, 1 = every related setting pushed to the maximum
+    const float c = pv (PID::complexity), e = pv (PID::energy), x = pv (PID::chaos);
     auto cl = [] (float v) { return juce::jlimit (0.0f, 1.0f, v); };
+    auto push = [&cl] (float v, float m) { return cl (v + (1.0f - v) * m); };
 
     GenSettings s;
     s.style      = (int) pv (PID::style);
-    s.density    = cl (pv (PID::density) * (0.5f + 0.5f * e));
-    s.ghosts     = cl (pv (PID::ghosts) * e);
-    s.hats       = cl (pv (PID::hats) * e);
-    s.chop       = cl (pv (PID::chop) * c);
-    s.cut16      = cl (pv (PID::cut16) * c);
-    s.rolls      = cl (pv (PID::rolls) * c);
-    s.maxRepeats = juce::jlimit (1, 4, (int) std::round ((float) pv (PID::maxRepeats) * (0.5f + 0.5f * c)));
-    s.stutter    = cl (pv (PID::stutter) * x);
-    s.reverse    = cl (pv (PID::reverse) * x);
-    s.pitchProb  = cl (pv (PID::pitchProb) * x);
+    s.density    = push (pv (PID::density), e * 0.8f);
+    s.ghosts     = push (pv (PID::ghosts), e);
+    s.hats       = push (pv (PID::hats), e * 0.8f);
+    s.chop       = push (pv (PID::chop), c);
+    s.cut16      = push (pv (PID::cut16), c * 0.7f);
+    s.rolls      = push (pv (PID::rolls), c * 0.8f);
+    const int rep = (int) pv (PID::maxRepeats);
+    s.maxRepeats = juce::jlimit (1, 4, rep + (int) std::round (c * (float) (4 - rep)));
+    s.fillAmount = push (pv (PID::fillAmt), c);
+    s.stutter    = push (pv (PID::stutter), x * 0.8f);
+    s.reverse    = push (pv (PID::reverse), x * 0.5f);
+    s.pitchProb  = push (pv (PID::pitchProb), x * 0.5f);
     s.pitchRange = (int) pv (PID::pitchRange);
-    s.gateProb   = cl (pv (PID::gateProb) * x);
-    s.variation  = cl (pv (PID::variation) * (0.5f + 0.5f * x));
-    s.backbone   = cl (pv (PID::backbone) * (x > 1.0f ? 1.0f - 0.3f * (x - 1.0f) : 1.0f));
-    s.fillAmount = cl (pv (PID::fillAmt) * (0.5f + 0.5f * c));
+    s.gateProb   = push (pv (PID::gateProb), x * 0.4f);
+    s.variation  = push (pv (PID::variation), x);
+    s.backbone   = cl (pv (PID::backbone) * (1.0f - 0.6f * x));
     s.humanize   = pv (PID::humanize);
     return s;
 }
@@ -180,30 +224,49 @@ void JSliceProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 {
     juce::ScopedNoDenormals noDenormals;
 
-    Transport t;
-    t.bpm = lastBpm.load();
+    // ---- host transport
+    double hBpm = 0.0, hPpq = 0.0;
+    bool hPlay = false;
     if (auto* ph = getPlayHead())
     {
         if (auto pos = ph->getPosition())
         {
-            if (auto b = pos->getBpm()) t.bpm = *b;
-            t.playing = pos->getIsPlaying();
-            if (auto q = pos->getPpqPosition()) t.ppq = *q;
+            if (auto b = pos->getBpm()) hBpm = *b;
+            hPlay = pos->getIsPlaying();
+            if (auto q = pos->getPpqPosition()) hPpq = *q;
         }
     }
-    hostPlaying.store (t.playing);
+    hostPlaying.store (hPlay);
+    hostBpm.store (hBpm);
+
+    // SYNC on  : tempo and bar position follow the DAW (the break is re-pitched / stretched to the host tempo)
+    // SYNC off : J-Slice runs on its own tempo, starting when the DAW or the PLAY button starts
+    const bool sync = pv (PID::syncOn) > 0.5f;
+    Transport t;
+    t.bpm = (sync && hBpm > 1.0) ? hBpm : (double) pv (PID::freeBpm);
     lastBpm.store (t.bpm);
 
-    if (! t.playing && internalPlay.load())
+    const bool internal = internalPlay.load();
+    if (sync && hPlay)
     {
+        t.playing = true;
+        t.ppq = hPpq;
+        internalRunning = false;
+        internalPpq = 0.0;
+    }
+    else if (internal || (! sync && hPlay))
+    {
+        if (! internalRunning) { internalRunning = true; internalPpq = 0.0; }
         t.playing = true;
         t.ppq = internalPpq;
         internalPpq += buffer.getNumSamples() / getSampleRate() * t.bpm / 60.0;
     }
-    else if (! internalPlay.load())
+    else
     {
+        internalRunning = false;
         internalPpq = 0.0;
     }
+    running.store (t.playing);
 
     engine.process (buffer, midi, t, currentEngineParams());
     midi.clear();
@@ -270,6 +333,7 @@ bool JSliceProcessor::loadFile (const juce::File& f, juce::String& error)
 
 void JSliceProcessor::setAudio (AudioData::Ptr audio, bool keepPattern)
 {
+    liveBaseKit = nullptr;
     Kit::Ptr oldKit = kit;
     analysis = Analyzer::analyze (audio->buffer, audio->sampleRate);
 
@@ -324,13 +388,20 @@ void JSliceProcessor::rebuildSlices()
     auto& a = *kit->audio;
     auto slices = Analyzer::makeSlices (analysis, a.buffer, a.sampleRate, kit->bpm, kit->bars, kit->gridOrigin, slicerSettings);
     Analyzer::classify (slices, a.buffer, a.sampleRate, kit->bpm, kit->gridOrigin);
-    Kit::Ptr oldKit = kit;
+    const auto now = juce::Time::getMillisecondCounter();
+    const bool newGesture = liveBaseKit == nullptr || now - liveBaseTime > 700;
+    if (newGesture)
+    {
+        liveBaseKit = kit;
+        liveBasePattern = pattern;
+    }
+    liveBaseTime = now;
     {
         const juce::ScopedLock sl (stateLock);
         kit = kit->cloneWithSlices (std::move (slices));
     }
     pushKit();
-    setPattern (Generator::remap (pattern, *oldKit, *kit), true);
+    setPattern (Generator::remap (liveBasePattern, *liveBaseKit, *kit), newGesture);
     sendChangeMessage();
 }
 
@@ -371,6 +442,7 @@ void JSliceProcessor::redetectTempo()
 
 void JSliceProcessor::updateSlices (std::vector<Slice> slices, bool reclassify)
 {
+    liveBaseKit = nullptr;
     if (kit == nullptr) return;
     auto& a = *kit->audio;
     Analyzer::finaliseSlices (slices, a.buffer.getNumSamples(), a.sampleRate, kit->bpm, kit->gridOrigin);

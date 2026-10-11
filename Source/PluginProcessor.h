@@ -33,11 +33,14 @@ namespace PID
     inline constexpr const char* maxRepeats = "maxRepeats";
     inline constexpr const char* humanize   = "humanize";
     // pattern
-    inline constexpr const char* bars       = "bars";
+    inline constexpr const char* steps      = "steps";
+    inline constexpr const char* fillOn     = "fillOn";
     inline constexpr const char* fillEvery  = "fillEvery";
     inline constexpr const char* swing      = "swing";
     inline constexpr const char* quantize   = "quantize";
     inline constexpr const char* seqOn      = "seqOn";
+    inline constexpr const char* syncOn     = "syncOn";
+    inline constexpr const char* freeBpm    = "freeBpm";
     // playback
     inline constexpr const char* tempoMode  = "tempoMode";
     inline constexpr const char* cycleMs    = "cycleMs";
@@ -57,6 +60,24 @@ namespace PID
     inline constexpr const char* reso       = "reso";
     inline constexpr const char* driveOn    = "driveOn";
     inline constexpr const char* drive      = "drive";
+    inline constexpr const char* compOn     = "compOn";
+    inline constexpr const char* compAmt    = "compAmt";
+    inline constexpr const char* compAtk    = "compAtk";
+    inline constexpr const char* compRel    = "compRel";
+    inline constexpr const char* compMix    = "compMix";
+    inline constexpr const char* dlyOn      = "dlyOn";
+    inline constexpr const char* dlyTime    = "dlyTime";
+    inline constexpr const char* dlyFb      = "dlyFb";
+    inline constexpr const char* dlyTone    = "dlyTone";
+    inline constexpr const char* dlyPing    = "dlyPing";
+    inline constexpr const char* dlyMix     = "dlyMix";
+    inline constexpr const char* dlySrc     = "dlySrc";
+    inline constexpr const char* revOn      = "revOn";
+    inline constexpr const char* revSize    = "revSize";
+    inline constexpr const char* revDamp    = "revDamp";
+    inline constexpr const char* revWidth   = "revWidth";
+    inline constexpr const char* revMix     = "revMix";
+    inline constexpr const char* revSrc     = "revSrc";
     inline constexpr const char* output     = "output";
     // remote triggers (map them to buttons / clip envelopes in Ableton)
     inline constexpr const char* genTrig    = "genTrig";
@@ -133,7 +154,9 @@ public:
 
     bc::GenSettings currentGenSettings() const;
     bc::EngineParams currentEngineParams() const;
-    double getLastBpm() const         { return lastBpm.load(); }
+    double getLastBpm() const         { return lastBpm.load(); }   // tempo actually used (host or free)
+    double getHostBpm() const         { return hostBpm.load(); }
+    bool   isRunning() const          { return running.load(); }
 
     juce::File exportMidi();
     juce::File exportAudio();
@@ -167,8 +190,16 @@ private:
     std::vector<bc::Pattern> undoStack, redoStack;
     juce::CriticalSection stateLock;
 
-    std::atomic<double> lastBpm { 172.0 };
+    std::atomic<double> lastBpm { 172.0 }, hostBpm { 0.0 };
+    std::atomic<bool> running { false };
     double internalPpq = 0.0;
+    bool internalRunning = false;
+
+    // live re-slicing : while settings keep changing, the pattern is remapped from the state
+    // captured at the start of the gesture (avoids drifting through many intermediate slicings)
+    bc::Kit::Ptr liveBaseKit;
+    bc::Pattern liveBasePattern;
+    juce::uint32 liveBaseTime = 0;
     std::atomic<int> genRequests { 0 }, mutRequests { 0 }, fillRequests { 0 };
     int lastMidiGen = 0, lastMidiMut = 0, lastMidiUndo = 0, lastMidiSeq = 0;
     std::shared_ptr<bool> alive = std::make_shared<bool> (true);

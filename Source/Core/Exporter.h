@@ -11,7 +11,7 @@ struct Exporter
     /** Bars needed so that the export contains the pattern and, if enabled, its fill. */
     static int exportBars (const EngineParams& p)
     {
-        int bars = p.patternBars;
+        int bars = (juce::jlimit (1, kMaxSteps, p.patternSteps) + kStepsPerBar - 1) / kStepsPerBar;
         if (p.fillEvery > 0) bars = juce::jmax (bars, p.fillEvery);
         return juce::jlimit (1, 16, bars);
     }
@@ -29,11 +29,11 @@ struct Exporter
         {
             const int bar = k / kStepsPerBar, s = k % kStepsPerBar;
             const bool fillBar = p.fillEvery > 0 && ((bar + 1) % p.fillEvery) == 0;
-            const Step& st = fillBar ? pat.fill[(size_t) s] : pat.steps[(size_t) ((bar % p.patternBars) * kStepsPerBar + s)];
+            const Step& st = fillBar ? pat.fill[(size_t) s] : pat.steps[(size_t) (k % juce::jlimit (1, kMaxSteps, p.patternSteps))];
             if (! st.on) continue;
             const double t0 = k + ((k % 2 == 1) ? swingOff : 0.0);
             const double t1 = k + 1 + (((k + 1) % 2 == 1) ? swingOff : 0.0);
-            const int roll = juce::jlimit (1, 4, (int) st.roll);
+            const int roll = juce::jlimit (1, kMaxRoll, (int) st.roll);
             for (int j = 0; j < roll; ++j)
             {
                 const double on = (t0 + j * (t1 - t0) / roll) / 4.0 * tpq;

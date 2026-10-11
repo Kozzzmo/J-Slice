@@ -21,6 +21,21 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     outGainSmooth.reset (sr, 0.02);
     for (auto& v : voices) v.active = false;
     crushPhase = 0.0f;
+    compEnv = 0.0f;
+
+    sendBuf.setSize (2, maxBlock, false, true, true);
+    wetBuf.setSize (2, maxBlock, false, true, true);
+
+    const auto dlyLen = (size_t) (sr * 4.0) + 8;
+    dlyL.assign (dlyLen, 0.0f);
+    dlyR.assign (dlyLen, 0.0f);
+    dlyWrite = 0;
+    dlyLpL = dlyLpR = 0.0f;
+    dlySamples.reset (sr, 0.08);
+    dlySamples.setCurrentAndTargetValue ((float) (sr * 0.25));
+
+    reverb.setSampleRate (sr);
+    reverb.reset();
 }
 
 void Engine::setKit (Kit::Ptr newKit)
@@ -39,23 +54,27 @@ void Engine::setPattern (const Pattern& p, bool quantiseToBar)
 }
 
 //==============================================================================
-const Step* Engine::stepAt (int64_t k, int patternBars, int fillEvery) const
+bool Engine::isFillBar (int64_t bar, int fillEvery) const
+{
+    return (fillEvery > 0 && ((bar + 1) % fillEvery) == 0) || bar == liveFillBar;
+}
+
+const Step* Engine::stepAt (int64_t k, const EngineParams& p) const
 {
     if (k < 0) return nullptr;
     const int64_t bar = k / kStepsPerBar;
-    const int s = (int) (k % kStepsPerBar);
-    const bool fillBar = (fillEvery > 0 && ((bar + 1) % fillEvery) == 0) || bar == liveFillBar;
-    if (fillBar) return &pattern.fill[(size_t) s];
-    return &pattern.steps[(size_t) ((bar % patternBars) * kStepsPerBar + s)];
+    if (isFillBar (bar, p.fillEvery)) return &pattern.fill[(size_t) (k % kStepsPerBar)];
+    const int len = juce::jlimit (1, kMaxSteps, p.patternSteps);
+    return &pattern.steps[(size_t) (k % len)];
 }
 
 double Engine::distanceToNext (int64_t k, int j, int roll, const EngineParams& p) const
 {
     if (j < roll - 1) return 1.0 / roll;
-    const int len = p.patternBars * kStepsPerBar;
-    for (int m = 1; m <= len; ++m)
+    const int len = juce::jlimit (1, kMaxSteps, p.patternSteps);
+    for (int m = 1; m <= len + kStepsPerBar; ++m)
     {
-        auto* st = stepAt (k + m, p.patternBars, p.fillEvery);
+        auto* st = stepAt (k + m, p);
         if (st != nullptr && st->on)
             return (double) m - (double) j / roll;
     }
@@ -65,7 +84,6 @@ double Engine::distanceToNext (int64_t k, int j, int roll, const EngineParams& p
 void Engine::pushEvent (const Ev& e)
 {
     if (numEvents >= kMaxEvents) return;
-    // insertion keeps events sorted by offset (stable)
     int i = numEvents++;
     while (i > 0 && events[(size_t) i - 1].offset > e.offset)
     {
@@ -84,21 +102,20 @@ void Engine::collectSeqEvents (double ppqStart, int startSample, int numSamples,
     const double samplesPerStep = samplesPerPpq / 4.0;
     const double swingOff = juce::jlimit (0.0f, 1.0f, p.swing) / 3.0;
     const int nSlices = (int) kit->slices.size();
+    const int len = juce::jlimit (1, kMaxSteps, p.patternSteps);
 
     for (int64_t k = kFirst; k <= kLast; ++k)
     {
-        auto* st = stepAt (k, p.patternBars, p.fillEvery);
+        auto* st = stepAt (k, p);
         if (st == nullptr || ! st->on) continue;
 
         const double off0 = (k % 2 == 1) ? swingOff : 0.0;
         const double off1 = ((k + 1) % 2 == 1) ? swingOff : 0.0;
         const double t0 = (double) k + off0, t1 = (double) (k + 1) + off1;
-        const int roll = juce::jlimit (1, 4, (int) st->roll);
+        const int roll = juce::jlimit (1, kMaxRoll, (int) st->roll);
 
-        const int64_t bar = k / kStepsPerBar;
         const bool fillBar = st >= pattern.fill.data() && st < pattern.fill.data() + kStepsPerBar;
-        const int ui = fillBar ? kMaxSteps + (int) (k % kStepsPerBar)
-                               : (int) ((bar % p.patternBars) * kStepsPerBar + k % kStepsPerBar);
+        const int ui = fillBar ? kMaxSteps + (int) (k % kStepsPerBar) : (int) (k % len);
 
         for (int j = 0; j < roll; ++j)
         {
@@ -110,11 +127,13 @@ void Engine::collectSeqEvents (double ppqStart, int startSample, int numSamples,
             e.offset = startSample + juce::jlimit (0, numSamples - 1, (int) ((tPpq - ppqStart) * samplesPerPpq));
             e.slice = juce::jlimit (0, nSlices - 1, (int) st->slice);
             // later hits of a roll get a little quieter, like a drummer's buzz roll
-            e.vel = (float) st->vel / 127.0f * (roll > 1 ? (1.0f - 0.08f * (float) j / roll) : 1.0f);
+            e.vel = (float) st->vel / 127.0f * (roll > 1 ? (1.0f - 0.25f * (float) j / roll) : 1.0f);
             e.reverse = st->reverse;
             e.pitch = (float) st->pitch;
             if (st->gate < 0.999f)
                 e.gateSamples = (int64_t) juce::jmax (32.0, st->gate * distanceToNext (k, j, roll, p) * samplesPerStep);
+            else if (roll > 1)
+                e.gateSamples = (int64_t) juce::jmax (32.0, distanceToNext (k, j, roll, p) * samplesPerStep);
             e.uiStep = ui;
             pushEvent (e);
         }
@@ -148,6 +167,7 @@ void Engine::trigger (const Ev& e, const EngineParams& p, double hostBpm)
     const int tail = p.poly ? 1 : p.tailMode;
     v->active = true;
     v->slice = e.slice;
+    v->send = sl.cls == HitClass::Snare || sl.cls == HitClass::Ghost;
     v->reverse = e.reverse;
     v->regionStart = juce::jlimit<int64_t> (0, len, sl.start);
     v->regionEnd = (tail == 0 && ! e.reverse) ? len : juce::jlimit<int64_t> (0, len, sl.end);
@@ -158,22 +178,25 @@ void Engine::trigger (const Ev& e, const EngineParams& p, double hostBpm)
     const double dir = e.reverse ? -1.0 : 1.0;
     const double startPos = e.reverse ? (double) (v->regionEnd - 1) : (double) v->regionStart;
 
-    v->cyclic = p.tempoMode == 2;
-    if (v->cyclic)
+    v->mode = p.tempoMode;
+    if (v->mode == TempoCyclic || v->mode == TempoStretch)
     {
         v->anchor = startPos;
         v->anchorInc = dir * srRatio * tempoRatio;
         v->grainInc = dir * srRatio * pitchRatio;
-        v->gA = v->gB = startPos;
-        v->cycleLen = juce::jmax (16, (int) (p.cycleMs * 0.001f * (float) sr));
-        v->xfadeLen = juce::jmax (1, juce::jmin (v->cycleLen / 4, (int) (0.001 * sr)));
+        v->cycleLen = juce::jmax (32, (int) (p.cycleMs * 0.001f * (float) sr));
         v->cycleCount = 0;
+        v->xfadeLen = juce::jmax (1, juce::jmin (v->cycleLen / 4, (int) (0.001 * sr)));
         v->xfadeCount = 0;
+        v->g[0] = v->g[1] = startPos;
+        // clean stretch : two Hann grains half a cycle apart ; head 1 starts at full weight on the attack
+        v->gPhase[0] = 0;
+        v->gPhase[1] = v->cycleLen / 2;
     }
     else
     {
         v->pos = startPos;
-        v->inc = dir * srRatio * pitchRatio * (p.tempoMode == 0 ? tempoRatio : 1.0);
+        v->inc = dir * srRatio * pitchRatio * (p.tempoMode == TempoRepitch ? tempoRatio : 1.0);
     }
 
     const float vel = juce::jlimit (0.0f, 1.0f, e.vel);
@@ -209,6 +232,11 @@ namespace
         const float c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
         return ((c3 * f + c2) * f + c1) * f + x0;
     }
+
+    inline float hann (int phase, int len)
+    {
+        return 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) phase / (float) len);
+    }
 }
 
 void Engine::renderVoices (juce::AudioBuffer<float>& out, int start, int end)
@@ -220,6 +248,8 @@ void Engine::renderVoices (juce::AudioBuffer<float>& out, int start, int end)
     const float* srcR = buf.getReadPointer (buf.getNumChannels() > 1 ? 1 : 0);
     float* oL = out.getWritePointer (0);
     float* oR = out.getWritePointer (out.getNumChannels() > 1 ? 1 : 0);
+    float* sL = sendBuf.getWritePointer (0);
+    float* sR = sendBuf.getWritePointer (1);
     const float releaseLen = (float) (0.003 * sr);
 
     for (auto& v : voices)
@@ -227,31 +257,50 @@ void Engine::renderVoices (juce::AudioBuffer<float>& out, int start, int end)
         if (! v.active) continue;
         for (int i = start; i < end; ++i)
         {
-            float l, r;
+            float l = 0.0f, r = 0.0f;
             double head, headInc;
-            if (v.cyclic)
+            if (v.mode == TempoCyclic)
             {
+                // Akai-style : a single read head jumps back to the moving anchor every cycle
                 if (v.cycleCount >= v.cycleLen)
                 {
-                    v.gB = v.gA;
-                    v.gA = v.anchor;
+                    v.g[1] = v.g[0];
+                    v.g[0] = v.anchor;
                     v.xfadeCount = v.xfadeLen;
                     v.cycleCount = 0;
                 }
-                l = hermite (srcL, len, v.gA);
-                r = hermite (srcR, len, v.gA);
+                l = hermite (srcL, len, v.g[0]);
+                r = hermite (srcR, len, v.g[0]);
                 if (v.xfadeCount > 0)
                 {
-                    const float a = (float) v.xfadeCount / (float) v.xfadeLen; // weight of the old grain
-                    l = l * (1.0f - a) + hermite (srcL, len, v.gB) * a;
-                    r = r * (1.0f - a) + hermite (srcR, len, v.gB) * a;
+                    const float a = (float) v.xfadeCount / (float) v.xfadeLen;
+                    l = l * (1.0f - a) + hermite (srcL, len, v.g[1]) * a;
+                    r = r * (1.0f - a) + hermite (srcR, len, v.g[1]) * a;
                     --v.xfadeCount;
                 }
-                v.gA += v.grainInc;
-                v.gB += v.grainInc;
+                v.g[0] += v.grainInc;
+                v.g[1] += v.grainInc;
                 head = v.anchor; headInc = v.anchorInc;
                 v.anchor += v.anchorInc;
                 ++v.cycleCount;
+            }
+            else if (v.mode == TempoStretch)
+            {
+                // clean overlap-add : two Hann-windowed grains, constant overall gain
+                for (int h = 0; h < 2; ++h)
+                {
+                    const float w = hann (v.gPhase[h], v.cycleLen);
+                    l += w * hermite (srcL, len, v.g[h]);
+                    r += w * hermite (srcR, len, v.g[h]);
+                    v.g[h] += v.grainInc;
+                    if (++v.gPhase[h] >= v.cycleLen)
+                    {
+                        v.gPhase[h] = 0;
+                        v.g[h] = v.anchor;
+                    }
+                }
+                head = v.anchor; headInc = v.anchorInc;
+                v.anchor += v.anchorInc;
             }
             else
             {
@@ -288,6 +337,7 @@ void Engine::renderVoices (juce::AudioBuffer<float>& out, int start, int end)
             const float g = v.gain * v.env * v.decayEnv;
             oL[i] += l * g;
             oR[i] += r * g;
+            if (v.send) { sL[i] += l * g; sR[i] += r * g; }
 
             if ((headInc >= 0.0 && head >= (double) v.regionEnd) || (headInc < 0.0 && head < (double) v.regionStart))
             {
@@ -299,12 +349,13 @@ void Engine::renderVoices (juce::AudioBuffer<float>& out, int start, int end)
 }
 
 //==============================================================================
-void Engine::applyFx (juce::AudioBuffer<float>& out, const EngineParams& p)
+void Engine::applyFx (juce::AudioBuffer<float>& out, const EngineParams& p, double bpm)
 {
     const int n = out.getNumSamples();
     float* L = out.getWritePointer (0);
     float* R = out.getWritePointer (out.getNumChannels() > 1 ? 1 : 0);
 
+    // ---- vintage sampler : sample-rate + bit reduction
     if (p.crushOn)
     {
         const float step = juce::jlimit (0.0f, 1.0f, p.rate / (float) sr);
@@ -322,13 +373,13 @@ void Engine::applyFx (juce::AudioBuffer<float>& out, const EngineParams& p)
         }
     }
 
+    // ---- filter
     if (p.filterOn)
     {
         using T = juce::dsp::StateVariableTPTFilterType;
         filter.setType (p.filterType == 0 ? T::lowpass : (p.filterType == 1 ? T::bandpass : T::highpass));
         filter.setResonance (0.5f + juce::jlimit (0.0f, 1.0f, p.reso) * 7.5f);
         cutoffSmooth.setTargetValue (juce::jlimit (20.0f, (float) (sr * 0.45), p.cutoff));
-        // update the cutoff in small chunks so automation stays smooth
         for (int s = 0; s < n; s += 32)
         {
             const int c = juce::jmin (32, n - s);
@@ -346,6 +397,7 @@ void Engine::applyFx (juce::AudioBuffer<float>& out, const EngineParams& p)
         cutoffSmooth.setCurrentAndTargetValue (juce::jlimit (20.0f, (float) (sr * 0.45), p.cutoff));
     }
 
+    // ---- drive
     if (p.driveOn)
     {
         const float d = 1.0f + 15.0f * p.drive * p.drive;
@@ -356,6 +408,105 @@ void Engine::applyFx (juce::AudioBuffer<float>& out, const EngineParams& p)
             R[i] = std::tanh (R[i] * d) * norm;
         }
     }
+
+    // ---- parallel compressor ("squash" : the classic way to make a break slam)
+    if (p.compOn)
+    {
+        const float thrDb = -36.0f * juce::jlimit (0.0f, 1.0f, p.compAmt);
+        const float ratio = 4.0f + 16.0f * p.compAmt;
+        const float makeup = juce::Decibels::decibelsToGain (-thrDb * (1.0f - 1.0f / ratio) * 0.6f);
+        const float atk = std::exp (-1.0f / (juce::jmax (0.1f, p.compAtkMs) * 0.001f * (float) sr));
+        const float rel = std::exp (-1.0f / (juce::jmax (5.0f, p.compRelMs) * 0.001f * (float) sr));
+        const float mix = juce::jlimit (0.0f, 1.0f, p.compMix);
+        for (int i = 0; i < n; ++i)
+        {
+            const float lvl = juce::jmax (std::abs (L[i]), std::abs (R[i]));
+            compEnv = lvl > compEnv ? atk * compEnv + (1.0f - atk) * lvl : rel * compEnv + (1.0f - rel) * lvl;
+            const float envDb = juce::Decibels::gainToDecibels (compEnv, -100.0f);
+            const float over = envDb - thrDb;
+            const float grDb = over > 0.0f ? -over * (1.0f - 1.0f / ratio) : 0.0f;
+            const float g = juce::Decibels::decibelsToGain (grDb) * makeup;
+            L[i] = L[i] * (1.0f - mix) + std::tanh (L[i] * g) * mix;
+            R[i] = R[i] * (1.0f - mix) + std::tanh (R[i] * g) * mix;
+        }
+    }
+
+    // ---- sends : delay and reverb take either the whole mix or only the snares / ghosts
+    wetBuf.clear (0, 0, n);
+    wetBuf.clear (1, 0, n);
+    float* wL = wetBuf.getWritePointer (0);
+    float* wR = wetBuf.getWritePointer (1);
+    const float* sendL = sendBuf.getReadPointer (0);
+    const float* sendR = sendBuf.getReadPointer (1);
+
+    if (p.dlyOn)
+    {
+        const int idx = juce::jlimit (0, 6, p.dlyTime);
+        const double samples = delayTimeSteps()[idx] * 15.0 / juce::jmax (30.0, bpm) * sr;
+        dlySamples.setTargetValue ((float) juce::jlimit (1.0, (double) dlyL.size() - 4.0, samples));
+        const int size = (int) dlyL.size();
+        const float fb = juce::jlimit (0.0f, 0.95f, p.dlyFb);
+        const float lpCoef = 0.05f + 0.9f * juce::jlimit (0.0f, 1.0f, p.dlyTone);
+        const float mix = p.dlyMix;
+        for (int i = 0; i < n; ++i)
+        {
+            const float d = dlySamples.getNextValue();
+            float rp = (float) dlyWrite - d;
+            while (rp < 0.0f) rp += (float) size;
+            const int i0 = (int) rp;
+            const float fr = rp - (float) i0;
+            const int i1 = (i0 + 1) % size;
+            const float yl = dlyL[(size_t) i0] * (1.0f - fr) + dlyL[(size_t) i1] * fr;
+            const float yr = dlyR[(size_t) i0] * (1.0f - fr) + dlyR[(size_t) i1] * fr;
+            dlyLpL += lpCoef * (yl - dlyLpL);
+            dlyLpR += lpCoef * (yr - dlyLpR);
+
+            const float inL = p.dlySrc == 0 ? L[i] : sendL[i];
+            const float inR = p.dlySrc == 0 ? R[i] : sendR[i];
+            if (p.dlyPing)
+            {
+                dlyL[(size_t) dlyWrite] = 0.5f * (inL + inR) + fb * dlyLpR;
+                dlyR[(size_t) dlyWrite] = fb * dlyLpL;
+            }
+            else
+            {
+                dlyL[(size_t) dlyWrite] = inL + fb * dlyLpL;
+                dlyR[(size_t) dlyWrite] = inR + fb * dlyLpR;
+            }
+            dlyWrite = (dlyWrite + 1) % size;
+            wL[i] += dlyLpL * mix;
+            wR[i] += dlyLpR * mix;
+        }
+    }
+    else
+    {
+        dlyLpL = dlyLpR = 0.0f;
+    }
+
+    if (p.revOn)
+    {
+        juce::Reverb::Parameters rp;
+        rp.roomSize = juce::jlimit (0.0f, 1.0f, p.revSize);
+        rp.damping = juce::jlimit (0.0f, 1.0f, p.revDamp);
+        rp.width = juce::jlimit (0.0f, 1.0f, p.revWidth);
+        rp.wetLevel = 1.0f;
+        rp.dryLevel = 0.0f;
+        reverb.setParameters (rp);
+        // reuse the send buffer as the reverb input (it is not needed any more after the delay)
+        float* inL = sendBuf.getWritePointer (0);
+        float* inR = sendBuf.getWritePointer (1);
+        if (p.revSrc == 0)
+        {
+            juce::FloatVectorOperations::copy (inL, L, n);
+            juce::FloatVectorOperations::copy (inR, R, n);
+        }
+        reverb.processStereo (inL, inR, n);
+        juce::FloatVectorOperations::addWithMultiply (wL, inL, p.revMix, n);
+        juce::FloatVectorOperations::addWithMultiply (wR, inR, p.revMix, n);
+    }
+
+    juce::FloatVectorOperations::add (L, wL, n);
+    juce::FloatVectorOperations::add (R, wR, n);
 
     outGainSmooth.setTargetValue (juce::Decibels::decibelsToGain (p.outDb));
     for (int i = 0; i < n; ++i)
@@ -372,6 +523,14 @@ void Engine::process (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, con
     const int n = out.getNumSamples();
     out.clear();
     numEvents = 0;
+    if (sendBuf.getNumSamples() < n)
+    {
+        // host sent a bigger block than announced : grow (rare, not real-time safe but better than crashing)
+        sendBuf.setSize (2, n, false, true, true);
+        wetBuf.setSize (2, n, false, true, true);
+    }
+    sendBuf.clear (0, 0, n);
+    sendBuf.clear (1, 0, n);
 
     {
         const juce::SpinLock::ScopedTryLockType tl (kitLock);
@@ -447,8 +606,8 @@ void Engine::process (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, con
 
         const int64_t kNow = (int64_t) std::floor ((t.ppq + n / samplesPerPpq) * 4.0);
         const int64_t bar = kNow / kStepsPerBar;
-        const bool fillBar = (p.fillEvery > 0 && ((bar + 1) % p.fillEvery) == 0) || bar == liveFillBar;
-        uiStep.store (fillBar ? kMaxSteps + (int) (kNow % kStepsPerBar) : (int) ((bar % p.patternBars) * kStepsPerBar + kNow % kStepsPerBar));
+        const int len = juce::jlimit (1, kMaxSteps, p.patternSteps);
+        uiStep.store (isFillBar (bar, p.fillEvery) ? kMaxSteps + (int) (kNow % kStepsPerBar) : (int) (kNow % len));
     }
     else if (! t.playing)
     {
@@ -465,12 +624,11 @@ void Engine::process (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, con
     }
     renderVoices (out, cursor, n);
 
-    // play cursor feedback : most recent active voice
     const Voice* newest = nullptr;
     for (auto& v : voices) if (v.active && (newest == nullptr || v.age > newest->age)) newest = &v;
-    uiSamplePos.store (newest != nullptr ? (newest->cyclic ? newest->anchor : newest->pos) : -1.0);
+    uiSamplePos.store (newest != nullptr ? (newest->mode >= TempoCyclic ? newest->anchor : newest->pos) : -1.0);
 
-    applyFx (out, p);
+    applyFx (out, p, bpm);
 }
 
 } // namespace bc

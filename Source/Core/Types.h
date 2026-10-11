@@ -31,6 +31,7 @@ constexpr int kMaxBars       = 8;
 constexpr int kMaxSteps      = kStepsPerBar * kMaxBars;
 constexpr int kFirstSliceNote = 36;         // C1 = slice 1 (same as Ableton Simpler slice mode)
 constexpr int kMaxSlices     = 64;
+constexpr int kMaxRoll       = 8;           // re-triggers inside one step (8 = 1/128 at 16 steps per bar)
 
 // MIDI notes used as remote controls (below the slice range)
 constexpr int kNoteGenerate  = 24;          // C0
@@ -60,7 +61,7 @@ struct Step
     uint8_t  vel      = 100;
     bool     reverse  = false;
     int8_t   pitch    = 0;      // semitones
-    uint8_t  roll     = 1;      // 1 = single hit, 2..4 = re-triggers inside the step
+    uint8_t  roll     = 1;      // 1 = single hit, 2..kMaxRoll = re-triggers inside the step
     float    gate     = 1.0f;   // 1 = until next event, < 1 shortens the hit
     bool     locked   = false;
     HitClass role     = HitClass::Kick;
@@ -115,7 +116,7 @@ struct Pattern
                 st.vel     = (uint8_t) juce::jlimit (1, 127, f[2].getIntValue());
                 st.reverse = f[3].getIntValue() != 0;
                 st.pitch   = (int8_t) juce::jlimit (-24, 24, f[4].getIntValue());
-                st.roll    = (uint8_t) juce::jlimit (1, 4, f[5].getIntValue());
+                st.roll    = (uint8_t) juce::jlimit (1, kMaxRoll, f[5].getIntValue());
                 st.gate    = juce::jlimit (0.05f, 1.0f, f[6].getFloatValue());
                 st.locked  = f[7].getIntValue() != 0;
                 st.role    = (HitClass) juce::jlimit (0, kNumClasses - 1, f[8].getIntValue());

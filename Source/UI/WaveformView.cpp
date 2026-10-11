@@ -6,6 +6,9 @@ using namespace ui;
 WaveformView::WaveformView (JSliceProcessor& p) : proc (p)
 {
     setRepaintsOnMouseActivity (false);
+    setTooltip ("Click: listen to a slice  |  drag a marker: move it\n"
+                "Double-click a slice tag (top strip): delete that slice  |  double-click the waveform: add a marker\n"
+                "Right-click: change the drum class, delete");
     refresh();
 }
 
@@ -31,7 +34,7 @@ void WaveformView::tick()
 
 juce::Rectangle<int> WaveformView::waveArea() const
 {
-    return getLocalBounds().reduced (10, 6).withTrimmedTop (18).withTrimmedBottom (16);
+    return getLocalBounds().reduced (10, 6).withTrimmedTop (22).withTrimmedBottom (16);
 }
 
 float WaveformView::sampleToX (double s) const
@@ -91,34 +94,69 @@ void WaveformView::rebuildPeaks()
     }
 }
 
+juce::Rectangle<float> WaveformView::tagRect (int i, bool& full) const
+{
+    const auto a = waveArea();
+    const auto& sl = kit->slices[(size_t) i];
+    const float x = sampleToX ((double) sl.start);
+    const float nextX = i + 1 < (int) kit->slices.size() ? sampleToX ((double) kit->slices[(size_t) i + 1].start) : (float) a.getRight();
+    const float fullW = 10.0f + 7.8f * (float) (juce::String (i + 1).length() + 1);
+    full = nextX - x >= fullW + 1.0f || i == hoverMarker || i == selected;
+    return { x, (float) a.getY() - 20.0f, full ? fullW : juce::jmax (4.0f, juce::jmin (8.0f, nextX - x - 1.0f)), 16.0f };
+}
+
+int WaveformView::tagAt (juce::Point<float> p) const
+{
+    if (kit == nullptr) return -1;
+    const auto a = waveArea();
+    if (p.y >= (float) a.getY()) return -1;
+    // the visible tag first, then the slice region under the mouse
+    for (int i = (int) kit->slices.size() - 1; i >= 0; --i)
+    {
+        bool full = false;
+        if (tagRect (i, full).expanded (1.0f, 3.0f).contains (p)) return i;
+    }
+    return sliceAt (p.x);
+}
+
 void WaveformView::paint (juce::Graphics& g)
 {
     using namespace juce;
+    const auto& pl = pal();
     auto r = getLocalBounds().toFloat();
-    g.setColour (col::panelEdge);
+    g.setColour (pl.inset);
     g.fillRoundedRectangle (r, 6.0f);
-    auto lcd = r.reduced (3.0f);
-    ColourGradient grad (col::lcdBg, lcd.getX(), lcd.getY(), col::lcdBg2, lcd.getX(), lcd.getBottom(), false);
-    g.setGradientFill (grad);
-    g.fillRoundedRectangle (lcd, 4.0f);
-    // LCD pixel texture
-    g.setColour (col::lcdInk.withAlpha (0.035f));
-    for (float y = lcd.getY(); y < lcd.getBottom(); y += 3.0f) g.drawHorizontalLine ((int) y, lcd.getX(), lcd.getRight());
+    g.setColour (pl.line);
+    g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
 
     const auto a = waveArea();
-    g.setColour (col::lcdInk);
 
     if (kit == nullptr || kit->audio == nullptr)
     {
-        g.setFont (monoFont (20.0f));
-        g.drawText ("DROP A BREAK HERE", a.withTrimmedBottom (a.getHeight() / 2), Justification::centredBottom);
-        g.setFont (monoFont (13.0f, false));
-        g.drawText ("or click BROWSE  -  WAV / AIFF / FLAC / MP3 / OGG", a.withTrimmedTop (a.getHeight() / 2 + 6), Justification::centredTop);
+        g.setColour (pl.text);
+        g.setFont (serifItalic (34.0f));
+        g.drawText ("Drop a break here", a.withTrimmedBottom (a.getHeight() / 2), Justification::centredBottom);
+        g.setFont (mono (12.0f));
+        g.setColour (pl.dim);
+        g.drawText ("OR CLICK BROWSE  -  WAV / AIFF / FLAC / MP3 / OGG", a.withTrimmedTop (a.getHeight() / 2 + 8), Justification::centredTop);
         return;
     }
 
     const double sps = kit->samplesPerStep();
     const int64_t len = kit->length();
+
+    // alternate slice shading + playing / selected slice
+    for (int i = 0; i < (int) kit->slices.size(); ++i)
+    {
+        const auto& sl = kit->slices[(size_t) i];
+        const float x0 = sampleToX ((double) sl.start), x1 = sampleToX ((double) sl.end);
+        Rectangle<float> band (x0, (float) a.getY(), x1 - x0, (float) a.getHeight());
+        if (i == playingSlice)      g.setColour (pl.accent.withAlpha (0.20f));
+        else if (i == selected)     g.setColour (pl.accent.withAlpha (0.10f));
+        else if (i % 2 == 1)        g.setColour (pl.raised.withAlpha (0.55f));
+        else continue;
+        g.fillRect (band);
+    }
 
     // beat grid
     for (int st = 0; ; ++st)
@@ -127,86 +165,73 @@ void WaveformView::paint (juce::Graphics& g)
         if (s >= (double) len) break;
         const float x = sampleToX (s);
         const bool bar = st % 16 == 0, beat = st % 4 == 0;
-        g.setColour (col::lcdInk.withAlpha (bar ? 0.35f : beat ? 0.18f : 0.07f));
-        g.drawVerticalLine ((int) x, (float) a.getY(), (float) a.getBottom());
-        if (bar)
+        g.setColour (bar ? pl.line : pl.faint.withAlpha (beat ? 0.9f : 0.35f));
+        if (bar || beat) g.drawVerticalLine ((int) x, (float) a.getY(), (float) a.getBottom());
+        else for (float y = (float) a.getY(); y < (float) a.getBottom(); y += 4.0f) g.fillRect (x, y, 1.0f, 1.0f);
+        if (bar && x < (float) a.getRight() - 380.0f)
         {
-            g.setFont (monoFont (10.0f));
-            g.drawText (String (st / 16 + 1), (int) x + 2, a.getBottom() + 1, 20, 12, Justification::left);
+            g.setFont (mono (10.5f));
+            g.setColour (pl.dim);
+            g.drawText (String (st / 16 + 1), (int) x + 3, a.getBottom() + 1, 24, 14, Justification::left);
         }
     }
 
-    // slice highlights
-    for (int i = 0; i < (int) kit->slices.size(); ++i)
+    // waveform (filled, symmetric)
+    const float mid = (float) a.getCentreY(), half = a.getHeight() * 0.47f;
+    Path wave;
+    if (! peaks.empty())
     {
-        const auto& sl = kit->slices[(size_t) i];
-        const float x0 = sampleToX ((double) sl.start), x1 = sampleToX ((double) sl.end);
-        if (i == playingSlice)
-        {
-            g.setColour (col::lcdInk.withAlpha (0.22f));
-            g.fillRect (Rectangle<float> (x0, (float) a.getY(), x1 - x0, (float) a.getHeight()));
-        }
-        else if (i == selected)
-        {
-            g.setColour (col::lcdInk.withAlpha (0.10f));
-            g.fillRect (Rectangle<float> (x0, (float) a.getY(), x1 - x0, (float) a.getHeight()));
-        }
+        wave.startNewSubPath ((float) a.getX(), mid);
+        for (int x = 0; x < (int) peaks.size(); ++x) wave.lineTo ((float) (a.getX() + x), mid - peaks[(size_t) x].second * half);
+        for (int x = (int) peaks.size() - 1; x >= 0; --x) wave.lineTo ((float) (a.getX() + x), mid - peaks[(size_t) x].first * half);
+        wave.closeSubPath();
+        g.setColour (pl.accent.withAlpha (0.85f));
+        g.fillPath (wave);
     }
+    g.setColour (pl.faint);
+    g.drawHorizontalLine ((int) mid, (float) a.getX(), (float) a.getRight());
 
-    // waveform
-    g.setColour (col::lcdInk.withAlpha (0.9f));
-    const float mid = (float) a.getCentreY(), half = a.getHeight() * 0.48f;
-    for (int x = 0; x < (int) peaks.size(); ++x)
-    {
-        const auto [lo, hi] = peaks[(size_t) x];
-        g.drawVerticalLine (a.getX() + x, mid - hi * half, mid - lo * half + 1.0f);
-    }
-
-    // markers + tags (full tag when there is room, otherwise a small coloured flag)
+    // markers + tags
     for (int i = 0; i < (int) kit->slices.size(); ++i)
     {
         const auto& sl = kit->slices[(size_t) i];
         const float x = sampleToX ((double) sl.start);
-        const float nextX = i + 1 < (int) kit->slices.size() ? sampleToX ((double) kit->slices[(size_t) i + 1].start) : (float) a.getRight();
         const bool hot = i == hoverMarker || i == dragMarker || i == selected;
-        g.setColour (col::lcdInk.withAlpha (hot ? 1.0f : 0.7f));
-        g.fillRect (Rectangle<float> (x - (hot ? 1.0f : 0.5f), (float) a.getY() - 2.0f, hot ? 2.0f : 1.0f, (float) a.getHeight() + 2.0f));
+        const auto cc = classColour (sl.cls);
+        g.setColour (hot ? pl.text : cc.withAlpha (0.75f));
+        g.fillRect (Rectangle<float> (x - (hot ? 1.0f : 0.5f), (float) a.getY() - 3.0f, hot ? 2.0f : 1.0f, (float) a.getHeight() + 3.0f));
 
-        const String txt = String (hitClassLetter (sl.cls)) + String (i + 1);
-        const float fullW = 6.0f + 6.0f * (float) txt.length();
-        const bool room = nextX - x >= fullW + 1.0f || hot;
-        auto tag = Rectangle<float> (x - 0.5f, (float) a.getY() - 17.0f, room ? fullW : juce::jmax (3.0f, juce::jmin (6.0f, nextX - x - 1.0f)), 14.0f);
-        g.setColour (col::lcdInk);
-        g.fillRect (tag);
-        g.setColour (classColour (sl.cls));
-        g.fillRect (tag.withWidth (juce::jmin (4.0f, tag.getWidth())));
-        if (room)
+        bool full = false;
+        auto tag = tagRect (i, full);
+        g.setColour (cc);
+        g.fillRoundedRectangle (tag, 2.5f);
+        if (full)
         {
-            g.setColour (col::lcdBg);
-            g.setFont (monoFont (9.5f));
-            g.drawText (txt, tag.withTrimmedLeft (4.0f).toNearestInt(), Justification::centred);
+            g.setColour (pl.onAccent);
+            g.setFont (mono (10.5f, true, 0.0f));
+            g.drawText (String (hitClassLetter (sl.cls)) + String (i + 1), tag.toNearestInt(), Justification::centred);
         }
     }
 
     // play head
     if (playPos >= 0.0)
     {
-        g.setColour (col::accent);
+        g.setColour (pl.text);
         g.fillRect (Rectangle<float> (sampleToX (playPos) - 1.0f, (float) a.getY(), 2.0f, (float) a.getHeight()));
     }
 
     // info line
-    g.setColour (col::lcdInk);
-    g.setFont (monoFont (11.0f));
+    g.setColour (pl.dim);
+    g.setFont (mono (10.5f));
     String info;
     info << (int) kit->slices.size() << " SLICES   " << String (kit->bpm, 2) << " BPM   " << kit->bars << (kit->bars > 1 ? " BARS   " : " BAR   ")
-         << String (kit->audio->sampleRate / 1000.0, 1) << " kHz   " << String ((double) len / kit->audio->sampleRate, 2) << " s";
-    g.drawText (info, a.getX(), a.getBottom() + 2, a.getWidth(), 12, Justification::right);
+         << String (kit->audio->sampleRate / 1000.0, 1) << " KHZ   " << String ((double) len / kit->audio->sampleRate, 2) << " S";
+    g.drawText (info, a.getX(), a.getBottom() + 1, a.getWidth(), 14, Justification::right);
 }
 
 void WaveformView::mouseMove (const juce::MouseEvent& e)
 {
-    const int m = markerAt ((float) e.x);
+    const int m = e.position.y < (float) waveArea().getY() ? tagAt (e.position) : markerAt ((float) e.x);
     if (m != hoverMarker)
     {
         hoverMarker = m;
@@ -228,6 +253,7 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
     const int m = markerAt ((float) e.x);
     if (m >= 0)
     {
+        markerMoved = false;
         dragMarker = m;
         dragSlices = kit->slices;
         return;
@@ -239,7 +265,8 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
 
 void WaveformView::mouseDrag (const juce::MouseEvent& e)
 {
-    if (dragMarker < 0 || kit == nullptr) return;
+    if (dragMarker < 0 || kit == nullptr || e.getDistanceFromDragStart() < 3) return;
+    markerMoved = true;
     const auto i = (size_t) dragMarker;
     int64_t lo = i > 0 ? dragSlices[i - 1].start + 64 : 0;
     int64_t hi = i + 1 < dragSlices.size() ? dragSlices[i + 1].start - 64 : kit->length() - 64;
@@ -251,16 +278,34 @@ void WaveformView::mouseUp (const juce::MouseEvent&)
 {
     if (dragMarker >= 0)
     {
-        proc.updateSlices (dragSlices, true);
+        if (markerMoved) proc.updateSlices (dragSlices, true);
         proc.previewSlice (dragMarker);
+        selected = dragMarker;
         dragMarker = -1;
+        markerMoved = false;
+        repaint();
     }
 }
 
 void WaveformView::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    if (kit == nullptr || (int) kit->slices.size() >= bc::kMaxSlices) return;
-    if (markerAt ((float) e.x) >= 0) return;
+    if (kit == nullptr) return;
+
+    // top strip (slice tags) : delete the slice
+    const int tag = tagAt (e.position);
+    if (tag >= 0)
+    {
+        if (kit->slices.size() <= 1) return;
+        auto slices = kit->slices;
+        slices.erase (slices.begin() + tag);
+        selected = -1;
+        hoverMarker = -1;
+        proc.updateSlices (slices, true);
+        return;
+    }
+
+    // waveform : add a marker
+    if ((int) kit->slices.size() >= bc::kMaxSlices || markerAt ((float) e.x) >= 0) return;
     auto slices = kit->slices;
     bc::Slice s;
     s.start = (int64_t) xToSample ((float) e.x);

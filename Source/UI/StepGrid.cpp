@@ -3,10 +3,15 @@
 
 using namespace ui;
 
-StepGrid::StepGrid (JSliceProcessor& p) : proc (p)
+StepGrid::StepGrid (JSliceProcessor& p)
+    : proc (p), fillToggle (p.apvts, PID::fillOn, "FILL")
 {
-    setTooltip ("Click: add / remove hit   |   Wheel: change slice   |   Drag up/down: velocity\n"
-                "Shift+click: lock (kept when you generate)   |   Alt+click: listen   |   Right click: options");
+    setTooltip ("Click: add / remove  |  right-click: add a REVERSED hit (or flip reverse)\n"
+                "Drag left / right: shorter / longer  |  drag up / down: re-triggers (x1 to x8)\n"
+                "Ctrl+drag: velocity  |  wheel: slice  |  shift+click: lock  |  alt+click: listen  |  shift+right-click: menu");
+    fillToggle.setTooltip ("Fill bar on / off (the FILL row replaces the last bar of every 2 / 4 / 8 bars)");
+    fillToggle.onStateChange = [this] { repaint(); };
+    addAndMakeVisible (fillToggle);
     refresh();
 }
 
@@ -20,23 +25,30 @@ void StepGrid::refresh()
 void StepGrid::tick()
 {
     const int s = proc.engine.uiStep.load();
-    if (s != playing) { playing = s; repaint(); }
+    const int shown = proc.isRunning() ? s : -1;
+    if (shown != playing) { playing = shown; repaint(); }
+}
+
+void StepGrid::resized()
+{
+    auto r = cellRect (bc::kMaxBars, 0);
+    fillToggle.setBounds (2, (int) r.getY(), kLabelW - 8, (int) r.getHeight());
 }
 
 juce::Rectangle<float> StepGrid::cellRect (int row, int col) const
 {
-    const float pitchX = (float) (getWidth() - kLabelW - 6 - 9) / 16.0f;          // 3 px gap between beats
-    const float pitchY = (float) (getHeight() - kHeaderH - 6 - 6) / (float) kRows;  // 6 px gap before the fill row
-    const float x = (float) kLabelW + col * pitchX + (float) (col / 4) * 3.0f;
-    const float y = (float) kHeaderH + row * pitchY + (row == bc::kMaxBars ? 6.0f : 0.0f);
-    return { x, y, pitchX - 2.0f, pitchY - 2.0f };
+    const float pitchX = (float) (getWidth() - kLabelW - 2 - 9) / 16.0f;            // 3 px between beats
+    const float pitchY = (float) (getHeight() - kHeaderH - 2 - 7) / (float) kRows;  // 7 px before the fill row
+    const float x = (float) kLabelW + (float) col * pitchX + (float) (col / 4) * 3.0f;
+    const float y = (float) kHeaderH + (float) row * pitchY + (row == bc::kMaxBars ? 7.0f : 0.0f);
+    return { x, y, pitchX - 3.0f, pitchY - 3.0f };
 }
 
 int StepGrid::indexAt (juce::Point<int> p) const
 {
     for (int r = 0; r < kRows; ++r)
         for (int c = 0; c < 16; ++c)
-            if (cellRect (r, c).expanded (1.0f).contains (p.toFloat()))
+            if (cellRect (r, c).expanded (1.5f).contains (p.toFloat()))
                 return r == bc::kMaxBars ? bc::kMaxSteps + c : r * 16 + c;
     return -1;
 }
@@ -49,89 +61,166 @@ const bc::Step& StepGrid::stepAt (int index) const
 void StepGrid::paint (juce::Graphics& g)
 {
     using namespace juce;
+    const auto& pl = pal();
     const auto ep = proc.currentEngineParams();
+    const int len = ep.patternSteps;
 
-    g.setColour (col::panelEdge);
-    g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
-
-    // header
-    g.setFont (monoFont (10.0f));
+    // beat numbers
+    g.setFont (mono (11.0f));
+    g.setColour (pl.dim);
     for (int c = 0; c < 16; c += 4)
-    {
-        auto r = cellRect (0, c);
-        g.setColour (col::dim);
-        g.drawText (String (c / 4 + 1), (int) r.getX(), 2, 20, kHeaderH - 2, Justification::left);
-    }
+        g.drawText (String (c / 4 + 1), (int) cellRect (0, c).getX() + 1, 0, 24, kHeaderH - 2, Justification::left);
 
     const int n = kit != nullptr ? (int) kit->slices.size() : 0;
     for (int r = 0; r < kRows; ++r)
     {
         const bool fillRow = r == bc::kMaxBars;
-        const bool active = fillRow ? ep.fillEvery > 0 : r < ep.patternBars;
-        auto first = cellRect (r, 0);
-        g.setColour (fillRow ? col::accent.withAlpha (active ? 1.0f : 0.4f) : col::cream.withAlpha (active ? 0.9f : 0.3f));
-        g.setFont (monoFont (11.0f));
-        g.drawText (fillRow ? "FILL" : String (r + 1), 2, (int) first.getY(), kLabelW - 6, (int) first.getHeight(), Justification::centredRight);
+        if (! fillRow)
+        {
+            auto first = cellRect (r, 0);
+            const bool rowUsed = r * 16 < len;
+            g.setFont (serif (20.0f));
+            g.setColour (rowUsed ? pl.text : pl.faint);
+            g.drawText (String (r + 1), 4, (int) first.getY(), kLabelW - 14, (int) first.getHeight(), Justification::centredRight);
+        }
 
         for (int c = 0; c < 16; ++c)
         {
             const int idx = fillRow ? bc::kMaxSteps + c : r * 16 + c;
+            const bool inUse = fillRow ? ep.fillEvery > 0 : idx < len;
             const auto& st = stepAt (idx);
             auto rc = cellRect (r, c);
-            const float dimA = active ? 1.0f : 0.38f;
+            const float a = inUse ? 1.0f : 0.3f;
 
-            g.setColour ((c % 4 == 0 ? Colour (0xff3d3a34) : Colour (0xff302e29)).withMultipliedAlpha (dimA));
+            g.setColour (pl.raised.withMultipliedAlpha (a));
             g.fillRoundedRectangle (rc, 3.0f);
+            g.setColour ((c % 4 == 0 ? pl.line : pl.faint).withMultipliedAlpha (a));
+            g.drawRoundedRectangle (rc.reduced (0.5f), 3.0f, 1.0f);
 
             if (st.on && n > 0)
             {
                 const int si = jlimit (0, n - 1, (int) st.slice);
-                const auto cls = kit->slices[(size_t) si].cls;
-                const float va = 0.4f + 0.6f * (float) st.vel / 127.0f;
-                auto fillR = rc;
-                if (st.gate < 0.999f) fillR = fillR.withWidth (jmax (6.0f, rc.getWidth() * (0.35f + 0.65f * st.gate)));
-                g.setColour (classColour (cls).withAlpha (va * dimA));
-                g.fillRoundedRectangle (fillR, 3.0f);
+                const auto cc = classColour (kit->slices[(size_t) si].cls);
+                const float va = 0.35f + 0.65f * (float) st.vel / 127.0f;
+                const float gw = jmax (5.0f, rc.getWidth() * jlimit (0.05f, 1.0f, st.gate));
+                auto body = rc.reduced (1.0f).withWidth (gw - 2.0f);
 
-                g.setColour (col::body.withAlpha (dimA));
-                g.setFont (monoFont (jmin (13.0f, rc.getHeight() * 0.6f)));
-                g.drawText (String (si + 1), rc.toNearestInt(), Justification::centred);
+                // body tint + top bar (the bar length = the hit length)
+                g.setColour (cc.withAlpha (0.16f * a));
+                g.fillRoundedRectangle (body, 2.5f);
+                g.setColour (cc.withAlpha (va * a));
+                g.fillRoundedRectangle (body.withHeight (jmin (5.0f, rc.getHeight() * 0.2f)), 1.5f);
 
-                g.setFont (monoFont (8.5f));
+                // re-triggers : the cell is divided
+                const int roll = jlimit (1, bc::kMaxRoll, (int) st.roll);
+                if (roll > 1)
+                {
+                    g.setColour (cc.withAlpha (0.7f * a));
+                    const float y0 = rc.getY() + rc.getHeight() * 0.62f, y1 = rc.getBottom() - 2.0f;
+                    for (int k = 0; k < roll; ++k)
+                    {
+                        const float x = rc.getX() + 2.0f + (rc.getWidth() - 4.0f) * (float) k / (float) roll;
+                        g.fillRect (x, y0, jmax (1.0f, (rc.getWidth() - 4.0f) / (float) roll - 1.5f), y1 - y0);
+                    }
+                }
+
+                g.setColour (pl.text.withMultipliedAlpha (a));
+                if (roll > 1)
+                {
+                    g.setFont (serif (jmax (11.0f, rc.getHeight() * 0.55f)));
+                    g.drawText (String (si + 1) + "  x" + String (roll), rc.withTrimmedTop (4.0f).withHeight (rc.getHeight() * 0.58f).toNearestInt(),
+                                Justification::centred);
+                }
+                else
+                {
+                    g.setFont (serif (jmin (21.0f, rc.getHeight() * 0.72f)));
+                    g.drawText (String (si + 1), rc.withTrimmedTop (3.0f).toNearestInt(), Justification::centred);
+                }
+
                 if (st.reverse)
                 {
                     Path tri;
-                    tri.addTriangle (rc.getX() + 2, rc.getY() + 5, rc.getX() + 7, rc.getY() + 2, rc.getX() + 7, rc.getY() + 8);
+                    const float tx = rc.getX() + 3.0f, ty = rc.getBottom() - 4.0f;
+                    tri.addTriangle (tx, ty - 3.0f, tx + 6.0f, ty - 6.5f, tx + 6.0f, ty + 0.5f);
+                    g.setColour (pl.hot.withMultipliedAlpha (a));
                     g.fillPath (tri);
                 }
-                for (int k = 1; k < st.roll; ++k)
-                    g.fillRect (rc.getRight() - 4.0f * k - 1.0f, rc.getY() + 2.0f, 2.5f, 4.0f);
                 if (st.pitch != 0)
+                {
+                    g.setColour (pl.dim);
+                    g.setFont (mono (10.0f, true, 0.0f));
                     g.drawText ((st.pitch > 0 ? "+" : "") + String ((int) st.pitch), rc.toNearestInt().reduced (2, 1), Justification::bottomRight);
+                }
             }
 
             if (st.locked)
             {
-                g.setColour (col::accent);
-                g.drawRoundedRectangle (rc.reduced (0.5f), 3.0f, 2.0f);
+                g.setColour (pl.active);
+                g.drawRoundedRectangle (rc.reduced (0.5f), 3.0f, 1.8f);
             }
             if (idx == playing)
             {
-                g.setColour (Colours::white.withAlpha (0.9f));
-                g.drawRoundedRectangle (rc.expanded (1.0f), 3.0f, 1.6f);
+                g.setColour (pl.text);
+                g.drawRoundedRectangle (rc.expanded (1.0f), 3.5f, 1.6f);
             }
         }
     }
 }
 
+void StepGrid::paintOverChildren (juce::Graphics& g)
+{
+    // live read-out while dragging
+    if (dragIndex < 0 || (dragMode != DragMode::Gate && dragMode != DragMode::Roll && dragMode != DragMode::Velocity)) return;
+    const auto& st = stepAt (dragIndex);
+    juce::String txt = dragMode == DragMode::Gate ? (st.gate >= 0.999f ? juce::String ("LEN FULL") : "LEN " + juce::String (juce::roundToInt (st.gate * 100)) + "%")
+                     : dragMode == DragMode::Roll ? "RETRIG x" + juce::String ((int) st.roll)
+                                                  : "VEL " + juce::String ((int) st.vel);
+    const int row = dragIndex >= bc::kMaxSteps ? bc::kMaxBars : dragIndex / 16;
+    const int col = dragIndex >= bc::kMaxSteps ? dragIndex - bc::kMaxSteps : dragIndex % 16;
+    auto rc = cellRect (row, col);
+    auto box = juce::Rectangle<float> (118.0f, 24.0f).withCentre ({ rc.getCentreX(), rc.getY() - 13.0f });
+    if (box.getY() < 0.0f) box.setY (rc.getBottom() + 3.0f);
+    box = box.constrainedWithin (getLocalBounds().toFloat());
+    g.setColour (ui::pal().accent);
+    g.fillRoundedRectangle (box, 4.0f);
+    g.setColour (ui::pal().onAccent);
+    g.setFont (ui::mono (12.5f));
+    g.drawText (txt, box.toNearestInt(), juce::Justification::centred);
+}
+
+//==============================================================================
+void StepGrid::addStep (int index, bool reversed)
+{
+    if (kit == nullptr || kit->slices.empty()) return;
+    const int abs = index >= bc::kMaxSteps ? (bc::kMaxSteps - 16 + index - bc::kMaxSteps) : index;
+    const int sl = juce::jmax (0, bc::Generator::naturalSliceForStep (*kit, abs));
+    const auto cls = kit->slices[(size_t) sl].cls;
+    proc.modifyStep (index, [sl, cls, reversed] (bc::Step& s)
+    {
+        s = bc::Step();
+        s.on = true; s.slice = (int16_t) sl; s.role = cls; s.vel = 110; s.reverse = reversed;
+    });
+    proc.previewSlice (sl);
+}
+
 void StepGrid::mouseDown (const juce::MouseEvent& e)
 {
-    dragged = false;
+    dragMode = DragMode::None;
+    dragUndoPushed = false;
     dragIndex = indexAt (e.getPosition());
+    downPos = e.getPosition();
     if (dragIndex < 0 || kit == nullptr || kit->slices.empty()) { dragIndex = -1; return; }
-    const auto& st = stepAt (dragIndex);
+    const auto st = stepAt (dragIndex);
 
-    if (e.mods.isPopupMenu()) { showStepMenu (dragIndex); dragIndex = -1; return; }
+    if (e.mods.isPopupMenu())
+    {
+        if (e.mods.isShiftDown()) showStepMenu (dragIndex);
+        else if (st.on)           proc.modifyStep (dragIndex, [] (bc::Step& s) { s.reverse = ! s.reverse; });
+        else                      addStep (dragIndex, true);
+        dragIndex = -1;
+        return;
+    }
+    if (e.mods.isMiddleButtonDown()) { showStepMenu (dragIndex); dragIndex = -1; return; }
     if (e.mods.isAltDown())   { if (st.on) proc.previewSlice (st.slice); dragIndex = -1; return; }
     if (e.mods.isShiftDown())
     {
@@ -139,43 +228,64 @@ void StepGrid::mouseDown (const juce::MouseEvent& e)
         dragIndex = -1;
         return;
     }
-    dragStartVel = st.vel;
-    dragStartY = e.y;
+    dragStart = st;
+    dragMode = DragMode::Pending;
 }
 
 void StepGrid::mouseDrag (const juce::MouseEvent& e)
 {
-    if (dragIndex < 0 || ! stepAt (dragIndex).on) return;
-    if (! dragged && std::abs (e.y - dragStartY) < 3) return;
-    const int vel = juce::jlimit (1, 127, dragStartVel + (dragStartY - e.y));
-    proc.modifyStep (dragIndex, [vel] (bc::Step& s) { s.vel = (uint8_t) vel; }, ! dragged);
-    dragged = true;
+    if (dragIndex < 0 || ! dragStart.on) return;
+    const int dx = e.x - downPos.x, dy = e.y - downPos.y;
+
+    if (dragMode == DragMode::Pending)
+    {
+        if (std::abs (dx) < 5 && std::abs (dy) < 5) return;
+        if (e.mods.isCommandDown() || e.mods.isCtrlDown()) dragMode = DragMode::Velocity;
+        else dragMode = std::abs (dx) > std::abs (dy) ? DragMode::Gate : DragMode::Roll;
+        setMouseCursor (dragMode == DragMode::Gate ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::UpDownResizeCursor);
+    }
+
+    const float cellW = cellRect (0, 0).getWidth();
+    std::function<void (bc::Step&)> fn;
+    if (dragMode == DragMode::Gate)
+    {
+        const float gate = juce::jlimit (0.05f, 1.0f, dragStart.gate + (float) dx / (cellW * 2.5f));
+        const float snapped = gate > 0.97f ? 1.0f : gate;
+        fn = [snapped] (bc::Step& s) { s.gate = snapped; };
+    }
+    else if (dragMode == DragMode::Roll)
+    {
+        const int roll = juce::jlimit (1, bc::kMaxRoll, (int) dragStart.roll + (int) std::round ((float) -dy / 14.0f));
+        fn = [roll] (bc::Step& s) { s.roll = (uint8_t) roll; };
+    }
+    else if (dragMode == DragMode::Velocity)
+    {
+        const int vel = juce::jlimit (1, 127, (int) dragStart.vel - dy);
+        fn = [vel] (bc::Step& s) { s.vel = (uint8_t) vel; };
+    }
+    if (fn)
+    {
+        proc.modifyStep (dragIndex, fn, ! dragUndoPushed);
+        dragUndoPushed = true;
+    }
 }
 
 void StepGrid::mouseUp (const juce::MouseEvent&)
 {
-    if (dragIndex >= 0 && ! dragged)
+    if (dragIndex >= 0 && dragMode == DragMode::Pending)
     {
         const auto& st = stepAt (dragIndex);
-        if (st.on)
-        {
-            if (! st.locked) proc.modifyStep (dragIndex, [] (bc::Step& s) { s = bc::Step(); });
-        }
-        else
-        {
-            const int abs = dragIndex >= bc::kMaxSteps ? (bc::kMaxSteps - 16 + dragIndex - bc::kMaxSteps) : dragIndex;
-            const int sl = bc::Generator::naturalSliceForStep (*kit, abs);
-            const auto cls = kit->slices[(size_t) juce::jmax (0, sl)].cls;
-            proc.modifyStep (dragIndex, [sl, cls] (bc::Step& s)
-            {
-                s = bc::Step();
-                s.on = true; s.slice = (int16_t) juce::jmax (0, sl); s.role = cls; s.vel = 110;
-            });
-            proc.previewSlice (juce::jmax (0, sl));
-        }
+        if (st.on) { if (! st.locked) proc.modifyStep (dragIndex, [] (bc::Step& s) { s = bc::Step(); }); }
+        else addStep (dragIndex, false);
+    }
+    else if (dragIndex >= 0 && dragMode == DragMode::Roll)
+    {
+        proc.previewSlice (stepAt (dragIndex).slice);
     }
     dragIndex = -1;
-    dragged = false;
+    dragMode = DragMode::None;
+    setMouseCursor (juce::MouseCursor::NormalCursor);
+    repaint();
 }
 
 void StepGrid::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
@@ -204,17 +314,15 @@ void StepGrid::showStepMenu (int index)
     m.addSubMenu ("Slice", slices);
     m.addItem (1, "Reverse", true, st.reverse);
     PopupMenu roll;
-    for (int r = 1; r <= 4; ++r) roll.addItem (100 + r, r == 1 ? String ("Off") : "x" + String (r), true, st.roll == r);
-    m.addSubMenu ("Roll", roll);
+    for (int r = 1; r <= bc::kMaxRoll; ++r) roll.addItem (100 + r, r == 1 ? String ("Off") : "x" + String (r), true, st.roll == r);
+    m.addSubMenu ("Re-triggers", roll);
     PopupMenu pitch;
     for (int p = 12; p >= -12; --p) pitch.addItem (200 + p + 12, (p > 0 ? "+" : "") + String (p) + " st", true, st.pitch == p);
     m.addSubMenu ("Pitch", pitch);
     PopupMenu gate;
-    for (int gIdx = 0; gIdx < 4; ++gIdx)
-    {
-        const float gv[] = { 1.0f, 0.75f, 0.5f, 0.25f };
-        gate.addItem (300 + gIdx, String (roundToInt (gv[gIdx] * 100)) + " %", true, std::abs (st.gate - gv[gIdx]) < 0.05f);
-    }
+    const float gv[] = { 1.0f, 0.75f, 0.5f, 0.25f, 0.1f };
+    for (int gIdx = 0; gIdx < 5; ++gIdx)
+        gate.addItem (300 + gIdx, gIdx == 0 ? String ("Full") : String (roundToInt (gv[gIdx] * 100)) + " %", true, std::abs (st.gate - gv[gIdx]) < 0.03f);
     m.addSubMenu ("Length", gate);
     PopupMenu vel;
     for (int v : { 127, 110, 90, 70, 50, 30 }) vel.addItem (400 + v, String (v), true, st.vel == v);
@@ -231,9 +339,10 @@ void StepGrid::showStepMenu (int index)
         auto& self = *safe;
         auto& pr = self.proc;
         auto k = self.kit;
+        if (k == nullptr || k->slices.empty()) return;
         auto ensureOn = [k, index] (bc::Step& s)
         {
-            if (! s.on && k != nullptr && ! k->slices.empty())
+            if (! s.on)
             {
                 const int abs = index >= bc::kMaxSteps ? (bc::kMaxSteps - 16 + index - bc::kMaxSteps) : index;
                 const int sl = juce::jmax (0, bc::Generator::naturalSliceForStep (*k, abs));
@@ -252,7 +361,7 @@ void StepGrid::showStepMenu (int index)
         else if (r == 3)  pr.previewSlice (st.slice);
         else if (r == 4)  pr.modifyStep (index, [] (bc::Step& s) { s = bc::Step(); });
         else if (r >= 400) { const int v = r - 400; pr.modifyStep (index, [ensureOn, v] (bc::Step& s) { ensureOn (s); s.vel = (uint8_t) v; }); }
-        else if (r >= 300) { const float gv[] = { 1.0f, 0.75f, 0.5f, 0.25f }; const float g = gv[r - 300]; pr.modifyStep (index, [ensureOn, g] (bc::Step& s) { ensureOn (s); s.gate = g; }); }
+        else if (r >= 300) { const float gvals[] = { 1.0f, 0.75f, 0.5f, 0.25f, 0.1f }; const float gt = gvals[r - 300]; pr.modifyStep (index, [ensureOn, gt] (bc::Step& s) { ensureOn (s); s.gate = gt; }); }
         else if (r >= 200) { const int p = r - 200 - 12; pr.modifyStep (index, [ensureOn, p] (bc::Step& s) { ensureOn (s); s.pitch = (int8_t) p; }); }
         else if (r >= 100) { const int rl = r - 100; pr.modifyStep (index, [ensureOn, rl] (bc::Step& s) { ensureOn (s); s.roll = (uint8_t) rl; }); }
     });

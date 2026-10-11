@@ -63,15 +63,25 @@ target_sources(JSlice PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/UI/LookAndFeel.cpp
+    Source/UI/Widgets.cpp
     Source/UI/WaveformView.cpp
     Source/UI/StepGrid.cpp
     Source/UI/BrowserPanel.cpp)
 
 target_include_directories(JSlice PRIVATE Source)
+
+# embedded fonts (SIL Open Font License, see Resources/Fonts)
+juce_add_binary_data(JSliceFonts SOURCES
+    Resources/Fonts/InstrumentSerif-Regular.ttf
+    Resources/Fonts/InstrumentSerif-Italic.ttf
+    Resources/Fonts/IBMPlexMono-Medium.ttf
+    Resources/Fonts/IBMPlexMono-SemiBold.ttf)
+set_target_properties(JSliceFonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_definitions(JSlice PUBLIC ${COMMON_DEFINITIONS})
 
 target_link_libraries(JSlice
     PRIVATE
+        JSliceFonts
         juce::juce_audio_utils
         juce::juce_audio_formats
         juce::juce_dsp

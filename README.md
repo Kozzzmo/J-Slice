@@ -7,7 +7,8 @@ les kicks / snares / hats / ghost notes, puis génère des séquences dans le st
 Ragga, Rinse-Out Choppage, Two-Step, Rollers, Liquid, Neurofunk, Halftime, Drumfunk, Breakcore),
 synchronisées au tempo d'Ableton.
 
-![J-Slice](docs/screenshot.png)
+![J-Slice (skin NEON)](docs/screenshot.png)
+![J-Slice (skin MIDNIGHT)](docs/screenshot-midnight.png)
 
 ## Télécharger et installer
 
@@ -21,65 +22,85 @@ synchronisées au tempo d'Ableton.
 
 ## Prise en main en 30 secondes
 
-1. **BROWSE** (ou glisser-déposer un fichier sur le plugin) → choisis un break. Avec
-   *Load on click*, les flèches haut/bas du clavier chargent les fichiers un par un : idéal
-   pour parcourir une collection de breaks. **+ FAV** mémorise un dossier dans tes favoris.
-2. Vérifie le **BREAK BPM** et le nombre de **BARS** détectés (corrige avec /2, x2 ou en tapant
-   la valeur ; **AUTO** revient à la détection).
-3. Choisis un **STYLE** (onglet MAIN) : ça charge ses réglages et génère un pattern.
-4. Lance la lecture dans Ableton (ou **PLAY** dans le plugin). **GENERATE** pour un nouveau
-   pattern, **MUTATE** pour des variations, **FILL!** pour jouer le fill à la mesure suivante.
+1. **BROWSE** (ou clic sur le nom du break, ou glisser-déposer un fichier sur le plugin) → choisis un
+   break. Avec *Load on click*, les flèches haut/bas chargent les fichiers un par un. **+ FAV**
+   mémorise un dossier dans tes favoris.
+2. Vérifie **BREAK BPM** et **BARS** (glisser, ou double-clic pour taper la valeur ; /2, x2,
+   **AUTO** revient à la détection).
+3. Choisis un **STYLE** à droite : ça charge ses réglages et génère un pattern.
+4. Lance Ableton (ou **PLAY**). **GENERATE** = nouveau pattern, **MUTATE** = variations,
+   **FILL!** = fill à la mesure suivante.
 
 ## L'interface
 
-### Écran du break (LCD)
-- Marqueurs colorés : **K** kick (rouge), **S** snare (jaune), **H** hat/cymbale (turquoise),
-  **G** ghost note (violet).
-- Clic : écouter une slice. Glisser un marqueur : le déplacer. Double-clic : ajouter un marqueur.
-  Clic droit : changer la classe, revenir à la classe automatique, supprimer.
-- **SLICER** : *Smart* (recommandé), *Transient*, *Grid*. **SENSITIVITY** : plus = plus de slices
-  (ghosts, charleys), moins = seulement les frappes principales. **PRE-ROLL** : coupe un peu avant
-  l'attaque pour garder le punch.
+### En-tête
+- **SWING**, **PITCH** : glisser haut/bas, molette, double-clic pour taper.
+- **SYNC** (allumé par défaut) : J-Slice suit le tempo et la position de mesure d'Ableton ; le
+  break est recalé sur le tempo du projet. Éteint : J-Slice tourne à son propre tempo (case **BPM**).
+- **BPM** : affiche le tempo utilisé (HOST = celui d'Ableton). Le modifier passe en tempo libre.
+- **SKIN** (en bas à droite) : NEON, MIDNIGHT ou AMEN.
 
-### Séquenceur (8 mesures + mesure de FILL)
-- Clic : ajouter / effacer une frappe. Molette : changer de slice. Glisser haut/bas : vélocité.
-- **Shift+clic** : verrouiller la case (contour orange) → elle est conservée quand tu régénères.
-- **Alt+clic** : écouter. **Clic droit** : slice, reverse, roll (x2-x4), pitch, longueur, vélocité.
-- Symboles : triangle = joué à l'envers, petits traits = roll, +n/-n = pitch, case plus courte =
-  frappe raccourcie.
-- **SEED** : même seed + mêmes réglages = même pattern. Tape un nombre + Entrée.
-- **UNDO / REDO** (64 niveaux), **UNLOCK ALL**.
-- **DRAG MIDI** : glisse le pattern en clip MIDI dans Ableton (C1 = slice 1, comme le mode
-  Slice du Simpler). **DRAG AUDIO** : glisse la boucle rendue en WAV (avec pitch, reverse, rolls et
-  effets).
-- **Keep groove when loading a new break** : en changeant de break, le pattern est conservé et
-  chaque frappe est remplacée par une frappe du même type dans le nouveau break.
+### Écran du break
+- Étiquettes colorées : **K** kick, **S** snare, **H** hat/cymbale, **G** ghost note.
+- Clic : écouter une slice. Glisser un marqueur : le déplacer.
+- **Double-clic sur une étiquette (bande du haut) : supprimer la slice.**
+- Double-clic dans la forme d'onde : ajouter un marqueur. Clic droit : classe, supprimer.
+- **SLICER** *Smart* / *Transient* / *Grid*, **SENSITIVITY**, **GRID**, **PRE-ROLL** : la découpe se
+  met à jour **en direct** pendant que tu bouges le réglage.
 
-### Onglet MAIN
-- **STYLE** : charge les réglages du style et génère.
-- **COMPLEXITY** (découpe, rolls, coupes en 1/16), **ENERGY** (densité, ghosts, hats),
-  **CHAOS** (reverse, pitch, stutters, frappes raccourcies, variations). À 50 % = réglages du
-  style ; 0 % = supprimé ; 100 % = doublé.
-- **PATTERN LENGTH** 1/2/4/8 mesures, **FILL** toutes les 2/4/8 mesures (ou Off), **SWING**,
-  **PITCH** global, **TEMPO MODE** :
+### Séquenceur (jusqu'à 128 pas + mesure de FILL)
+| Geste | Action |
+|------|--------|
+| Clic | ajouter / effacer une frappe |
+| **Clic droit** | **ajouter une frappe à l'envers** (ou inverser une frappe existante) |
+| **Clic maintenu + gauche / droite** | **raccourcir / rallonger** la frappe |
+| **Clic maintenu + haut / bas** | **re-triggers** (x1 à x8 dans le pas) |
+| Ctrl + glisser haut/bas | vélocité |
+| Molette | changer de slice |
+| Shift + clic | verrouiller (gardé quand on régénère) |
+| Alt + clic | écouter |
+| Shift + clic droit | menu (slice, pitch, longueur, vélocité…) |
+
+- **L:64** avec **-** / **+** : longueur du pattern en pas (16 = 1 mesure ; shift = une mesure).
+- **FILL** (bouton à gauche de la ligne de fill) : éteint par défaut. Allumé, la ligne FILL remplace
+  la dernière mesure **toutes les 2 / 4 / 8 mesures** (menu à côté de la longueur).
+- **SEED**, **UNDO / REDO**, **-LOCKS**, **SEQ** (off = jouer les slices au clavier, C1 = slice 1).
+- **KEEP GROOVE ON LOAD** : en changeant de break, le pattern est conservé et chaque frappe est
+  remplacée par une frappe du même type.
+
+### Macros (à droite)
+**COMPLEXITY** (découpe, coupes en 1/16, rolls, répétitions, fills), **ENERGY** (densité, ghosts,
+hats), **CHAOS** (bégaiements, reverse, pitch, frappes courtes, variations). **À 0 (par défaut) le
+style est joué tel quel** ; en montant, les réglages correspondants sont poussés jusqu'au maximum.
+
+### Onglet GENERATOR
+Density, Backbone (respect du squelette kick/snare du style), Ghosts, Hats, Chop, 16th cut, Repeats,
+Rolls, Stutter, Reverse, Pitch %, Pitch range, Short, Variation, Fill amount, Humanize.
+
+### Onglet PLAYBACK
+- **TEMPO MODE** :
   - *Repitch (vintage)* : le break est accéléré comme sur un sampler des années 90 (le pitch monte) ;
-  - *Slice (original speed)* : chaque frappe garde sa hauteur, recalée sur la grille ;
-  - *Cyclic stretch (Akai)* : time-stretch "métallique" façon Akai S950/S1000 (**CYCLE** = longueur
-    du cycle).
-- **Changes on next bar** : un nouveau pattern démarre proprement à la mesure suivante.
+  - *Slice (original speed)* : chaque frappe garde sa hauteur et sa vitesse ;
+  - *Cyclic stretch (Akai)* : time-stretch métallique façon Akai S950/S1000 ;
+  - *Stretch (clean)* : time-stretch propre, la hauteur ne bouge pas et le break suit le tempo.
+  **GRAIN** règle la taille des cycles des deux modes stretch.
+- **VOICES** Mono/Poly, **SLICE TAIL** Chunk (le break continue jusqu'à la frappe suivante) /
+  Hit (s'arrête à la fin de la slice), **ATTACK**, **TIGHT**, **VELOCITY**.
+- **NEXT BAR** : un nouveau pattern démarre proprement à la mesure suivante.
 
-### Onglet GENERATOR (réglages fins, modulés par les 3 macros)
-Density, Backbone (respect du squelette kick/snare du style), Ghosts, Hats, Chop (sauts dans le
-break), 16th cuts, Repeats, Rolls, Stutter, Reverse, Pitch prob, Pitch range, Short hits,
-Variation, Fill amount, Humanize.
+### Onglet COLOUR (chaque section a son bouton on/off)
+- **VINTAGE** : réduction de bits et de fréquence d'échantillonnage (12 bits / 26 kHz).
+- **FILTER** : passe-bas / passe-bande / passe-haut résonant.
+- **DRIVE** : saturation.
+- **SQUASH** : compression parallèle (le classique pour faire « claquer » un Amen) :
+  Amount, Attack, Release, Mix.
 
-### Onglet SOUND
-- **Voices** Mono (une frappe coupe la précédente, son "haché" typique) ou Poly.
-- **Slice tail** : *Chunk* (le break continue de jouer jusqu'à la frappe suivante, son jungle
-  classique) ou *Hit* (chaque frappe s'arrête à la fin de sa slice, plus propre pour la DnB).
-- **Attack**, **Tightness** (raccourcit les queues), **Velocity** (sensibilité).
-- **Vintage sampler** (bits + fréquence d'échantillonnage, 12 bits / 26 kHz par défaut),
-  **Filter** (LP/BP/HP résonant), **Drive**, **Output**. Chaque section a son bouton On.
+### Onglet SPACE
+- **DELAY** synchronisé au tempo (1/16 à 1/2, triolets, pointés), **ping-pong**, Feedback, Tone,
+  Level. **SOURCE** : tout le break ou **seulement les snares** (le dub-delay sur la caisse claire
+  typique du ragga jungle).
+- **REVERB** : Size, Damp, Width, Level, source tout ou **snares seulement**.
+- **OUTPUT**.
 
 ## Contrôle MIDI et automation
 
@@ -95,8 +116,7 @@ Variation, Fill amount, Humanize.
 Tous les paramètres sont automatisables. *Trigger: generate / mutate / fill* sont des paramètres
 "boutons" pour Push, un contrôleur MIDI ou une enveloppe de clip.
 
-Astuce : **SEQ off** + un clip MIDI = tu joues toi-même les slices (par exemple le clip obtenu
-avec DRAG MIDI, que tu peux ensuite éditer dans Ableton).
+Astuce : **SEQ off** + un clip MIDI = tu joues toi-même les slices dans Ableton.
 
 ## Le break et le projet Ableton
 
@@ -136,5 +156,6 @@ Chaque push sur `main` lance la compilation sur GitHub Actions et met à jour la
 
 ## Licence
 
+Polices intégrées : Instrument Serif et IBM Plex Mono (SIL Open Font License, voir `Resources/Fonts`).
 J-Slice utilise le framework [JUCE](https://juce.com) (licence AGPLv3 ou licence commerciale JUCE ;
 usage personnel gratuit). Si tu distribues le plugin, respecte les conditions de la licence JUCE.

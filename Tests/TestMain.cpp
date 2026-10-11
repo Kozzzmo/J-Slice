@@ -263,7 +263,7 @@ int main (int argc, char** argv)
         const auto& style = getStyles()[(size_t) si];
         auto p = Generator::generate (*kit, style.defaults, 2026, nullptr);
         EngineParams ep;
-        ep.patternBars = 4; ep.fillEvery = 4; ep.tailMode = style.tailMode; ep.tempoMode = style.tempoMode; ep.swing = style.swing;
+        ep.patternSteps = 64; ep.fillEvery = 4; ep.tailMode = style.tailMode; ep.tempoMode = style.tempoMode; ep.swing = style.swing;
         ep.crushOn = true; ep.bits = 12; ep.rate = 26000;
         auto f = outDir.getChildFile (juce::String ("demo_") + juce::String (style.name).replaceCharacters (" /()", "____") + ".wav");
         const bool ok = Exporter::renderAudio (kit, p, ep, 4, 172.0, 44100.0, f);
@@ -286,12 +286,48 @@ int main (int argc, char** argv)
         check (midiOk, "MIDI export");
     }
 
-    // cyclic stretch mode render
+    // stretch modes + every effect on, odd pattern length, 8x rolls
+    for (int mode : { (int) TempoCyclic, (int) TempoStretch })
     {
         auto p = Generator::generate (*kit, getStyles()[0].defaults, 5, nullptr);
-        EngineParams ep; ep.patternBars = 2; ep.tempoMode = 2; ep.cycleMs = 35;
-        const bool ok = Exporter::renderAudio (kit, p, ep, 2, 172.0, 44100.0, outDir.getChildFile ("demo_cyclic_stretch.wav"));
-        check (ok, "cyclic stretch render");
+        p.steps[4].roll = 8;
+        EngineParams ep; ep.patternSteps = 27; ep.tempoMode = mode; ep.cycleMs = 35;
+        ep.compOn = ep.dlyOn = ep.revOn = ep.crushOn = ep.filterOn = ep.driveOn = true;
+        ep.cutoff = 6000.0f; ep.dlySrc = 1; ep.revSrc = 1;
+        auto f = outDir.getChildFile (mode == TempoCyclic ? "demo_cyclic_stretch.wav" : "demo_clean_stretch_fx.wav");
+        const bool ok = Exporter::renderAudio (kit, p, ep, 2, 172.0, 44100.0, f);
+        juce::AudioFormatManager fm; fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (f));
+        float peak = 0.0f; bool finite = true;
+        if (rd != nullptr)
+        {
+            juce::AudioBuffer<float> b (2, (int) rd->lengthInSamples);
+            rd->read (&b, 0, b.getNumSamples(), 0, true, true);
+            peak = b.getMagnitude (0, b.getNumSamples());
+            for (int c = 0; c < 2; ++c)
+                for (int i = 0; i < b.getNumSamples(); ++i)
+                    finite &= std::isfinite (b.getSample (c, i));
+        }
+        std::printf ("  mode %d with all FX : peak %.2f\n", mode, peak);
+        check (ok && finite && peak > 0.05f && peak < 4.0f, juce::String ("stretch mode ") + juce::String (mode) + " + FX render");
+    }
+
+    // clean stretch keeps the break length in time : a 1-bar chunk at 172 BPM must last one bar
+    {
+        Pattern p;
+        p.steps[0].on = true; p.steps[0].slice = 0; p.steps[0].vel = 127;
+        EngineParams ep; ep.patternSteps = 16; ep.tempoMode = TempoStretch; ep.tailMode = 0;
+        auto f = outDir.getChildFile ("stretch_length.wav");
+        Exporter::renderAudio (kit, p, ep, 1, 172.0, 44100.0, f);
+        juce::AudioFormatManager fm; fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (f));
+        juce::AudioBuffer<float> b (2, (int) rd->lengthInSamples);
+        rd->read (&b, 0, b.getNumSamples(), 0, true, true);
+        // energy in the last 16th of the bar should still be present (the break is stretched, not cut)
+        const int lastStep = b.getNumSamples() / 16;
+        const float rmsEnd = b.getRMSLevel (0, b.getNumSamples() - lastStep, lastStep);
+        check (rmsEnd > 0.005f, "clean stretch fills the whole bar");
+        f.deleteFile();
     }
 
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL TESTS PASSED" : "SOME TESTS FAILED", failures, failures == 1 ? "" : "s");

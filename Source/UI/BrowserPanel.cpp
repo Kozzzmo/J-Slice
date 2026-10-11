@@ -127,9 +127,12 @@ void BrowserPanel::paint (juce::Graphics& g)
 {
     using namespace juce;
     auto r = getLocalBounds().toFloat();
-    g.setColour (Colours::black.withAlpha (0.5f));
-    g.fillRoundedRectangle (r.translated (3, 3), 8.0f);
-    drawPanel (g, getLocalBounds(), "Sample browser");
+    g.setColour (Colours::black.withAlpha (0.45f));
+    g.fillRoundedRectangle (r.translated (4, 4), 8.0f);
+    drawPanel (g, getLocalBounds(), "");
+    g.setFont (serifItalic (24.0f));
+    g.setColour (pal().text);
+    g.drawText ("Breaks", 14, 6, 200, 26, Justification::centredLeft);
 }
 
 void BrowserPanel::resized()

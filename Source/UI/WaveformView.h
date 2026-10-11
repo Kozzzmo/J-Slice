@@ -4,8 +4,8 @@
 
 class JSliceProcessor;
 
-/** Green LCD showing the break, the beat grid and the slice markers (editable). */
-class WaveformView : public juce::Component
+/** Display showing the break, the beat grid and the slice markers (editable). */
+class WaveformView : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     explicit WaveformView (JSliceProcessor& p);
@@ -26,6 +26,8 @@ private:
     float sampleToX (double s) const;
     double xToSample (float x) const;
     int markerAt (float x) const;
+    int tagAt (juce::Point<float> p) const;          // slice whose tag (top strip) is under the mouse
+    juce::Rectangle<float> tagRect (int slice, bool& full) const;
     int sliceAt (float x) const;
     void rebuildPeaks();
     void showSliceMenu (int slice);
@@ -35,5 +37,6 @@ private:
     std::vector<std::pair<float, float>> peaks;
     int hoverMarker = -1, dragMarker = -1, selected = -1, playingSlice = -1;
     double playPos = -1.0;
+    bool markerMoved = false;
     std::vector<bc::Slice> dragSlices;
 };
