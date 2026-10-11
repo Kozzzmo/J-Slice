@@ -66,26 +66,104 @@ jobs:
           name: J-Slice-Windows
           path: J-Slice-Windows.zip
 
+  macos:
+    name: macOS (VST3 + AU + Standalone, Universal)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache JUCE download
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: juce-8.0.9-${{ runner.os }}
+
+      - name: Configure
+        run: |
+          set -o pipefail
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 2>&1 | tee configure.log || {
+            echo "::error title=CMake configure failed::$(tail -n 25 configure.log | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"; exit 1; }
+
+      - name: Build plugin and tests
+        run: |
+          set -o pipefail
+          cmake --build build --config Release --parallel 4 --target JSlice_VST3 JSlice_AU JSlice_Standalone JSliceTests 2>&1 | tee build.log || {
+            echo "::error title=Build failed::$(grep -E 'error' build.log | head -n 25 | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')"; exit 1; }
+
+      - name: Run tests
+        run: ./build/JSliceTests_artefacts/Release/JSliceTests test-output
+
+      - name: Ad-hoc code signature (required to load on Apple Silicon)
+        run: |
+          A=build/JSlice_artefacts/Release
+          for b in "$A/VST3/J-Slice.vst3" "$A/AU/J-Slice.component" "$A/Standalone/J-Slice.app"; do
+            codesign --force --deep --sign - "$b"
+            codesign --verify --verbose "$b"
+            lipo -info "$(find "$b/Contents/MacOS" -type f | head -n 1)"
+          done
+
+      - name: Validate the Audio Unit (auval)
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/JSlice_artefacts/Release/AU/J-Slice.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          sleep 3
+          auval -v aumu JSlc Kozz
+
+      - name: Package
+        run: |
+          out=package/J-Slice
+          mkdir -p "$out/demo-loops"
+          A=build/JSlice_artefacts/Release
+          ditto "$A/VST3/J-Slice.vst3" "$out/J-Slice.vst3"
+          ditto "$A/AU/J-Slice.component" "$out/J-Slice.component"
+          ditto "$A/Standalone/J-Slice.app" "$out/J-Slice.app"
+          cp docs/INSTALL-MAC.txt "$out/LISEZ-MOI.txt"
+          cp docs/install-mac.sh "$out/install.sh"
+          chmod +x "$out/install.sh"
+          cp test-output/*.wav "$out/demo-loops/"
+          (cd package && ditto -c -k --sequesterRsrc --keepParent J-Slice ../J-Slice-macOS.zip)
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: J-Slice-macOS
+          path: J-Slice-macOS.zip
+
+  release:
+    name: Publish downloads
+    needs: [ windows, macos ]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Publish "latest" download (main branch)
         if: github.ref == 'refs/heads/main'
-        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest J-Slice-Windows.zip \
+          gh release create latest dist/J-Slice-Windows.zip dist/J-Slice-macOS.zip \
             --title "J-Slice - latest build" \
-            --notes "Automatic build of commit ${GITHUB_SHA::7}. Unzip, copy J-Slice.vst3 to C:\\Program Files\\Common Files\\VST3, then rescan plug-ins in Ableton Live." \
+            --notes "Automatic build of commit ${GITHUB_SHA::7}.
+          Windows : unzip, copy J-Slice.vst3 to C:\\Program Files\\Common Files\\VST3, rescan plug-ins in Ableton Live.
+          macOS : unzip, open Terminal, type bash + space, drag install.sh into the window, press Enter (see LISEZ-MOI.txt)." \
             --prerelease --target "$GITHUB_SHA"
 
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "$GITHUB_REF_NAME" J-Slice-Windows.zip --title "J-Slice $GITHUB_REF_NAME" --generate-notes || \
-          gh release upload "$GITHUB_REF_NAME" J-Slice-Windows.zip --clobber
+          gh release create "$GITHUB_REF_NAME" dist/*.zip --title "J-Slice $GITHUB_REF_NAME" --generate-notes || \
+          gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber
 
   linux-tests:
     name: Linux (tests + pluginval)

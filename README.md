@@ -12,13 +12,23 @@ synchronisées au tempo d'Ableton.
 
 ## Télécharger et installer
 
-1. Ouvre la page **Releases** du dépôt → **latest** → télécharge `J-Slice-Windows.zip`
-   (ou onglet **Actions** → dernier build → artifact `J-Slice-Windows`).
-2. Dézippe et copie **tout le dossier** `J-Slice.vst3` dans `C:\Program Files\Common Files\VST3`.
-3. Ableton Live 12 : *Settings → Plug-Ins* → active **Use VST3 Plug-In System Folders** → **Rescan**.
-4. *Plug-Ins → Kozzzmo → J-Slice* : glisse-le sur une piste MIDI.
+Page **Releases** du dépôt → **latest** (https://github.com/Kozzzmo/J-Slice/releases/tag/latest).
 
-`J-Slice.exe` (dans le zip) est une version autonome pour tester sans Ableton.
+### Windows
+1. Télécharge `J-Slice-Windows.zip`, dézippe.
+2. Copie **tout le dossier** `J-Slice.vst3` dans `C:\Program Files\Common Files\VST3`.
+3. Ableton Live 12 : *Settings → Plug-Ins* → **Use VST3 Plug-In System Folders** → **Rescan**.
+
+### Mac (Apple Silicon et Intel, macOS 11+) : VST3 et Audio Unit
+1. Télécharge `J-Slice-macOS.zip`, dézippe.
+2. Ouvre le **Terminal**, tape `bash ` (avec un espace), glisse `install.sh` du dossier dans la
+   fenêtre, puis Entrée. Le script installe le VST3 et l'AU et lève le blocage de macOS (le plugin
+   n'est pas signé par Apple).
+3. Ableton Live 12 : *Settings → Plug-Ins* → **Use Audio Units** et/ou **Use VST3 Plug-In System
+   Folders** → **Rescan**.
+
+Puis *Plug-Ins → Kozzzmo → J-Slice* : glisse-le sur une piste MIDI. Les zips contiennent aussi une
+version autonome (`J-Slice.exe` / `J-Slice.app`) pour tester sans Ableton.
 
 ## Prise en main en 30 secondes
 
@@ -158,7 +168,9 @@ Organisation du code :
 
 ## Compiler soi-même
 
-Pré-requis : CMake ≥ 3.22, Visual Studio 2022 (Windows). JUCE 8 est téléchargé automatiquement.
+Pré-requis : CMake ≥ 3.22, Visual Studio 2022 (Windows) ou Xcode (Mac). JUCE 8 est téléchargé
+automatiquement. Sur Mac : `cmake -B build -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"` puis
+`cmake --build build --config Release --target JSlice_AU JSlice_VST3`.
 
 ```
 cmake -B build -G "Visual Studio 17 2022" -A x64

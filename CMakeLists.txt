@@ -41,6 +41,12 @@ set(COMMON_DEFINITIONS
     JUCE_MODAL_LOOPS_PERMITTED=1)
 
 #==============================================================================
+if(APPLE)
+    set(JSLICE_FORMATS VST3 AU Standalone)
+else()
+    set(JSLICE_FORMATS VST3 Standalone)
+endif()
+
 if(JSLICE_BUILD_PLUGIN)
 juce_add_plugin(JSlice
     PRODUCT_NAME "J-Slice"
@@ -56,7 +62,8 @@ juce_add_plugin(JSlice
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD FALSE
     VST3_CATEGORIES Instrument Sampler Drum
-    FORMATS VST3 Standalone)
+    AU_MAIN_TYPE kAudioUnitType_MusicDevice
+    FORMATS ${JSLICE_FORMATS})
 
 target_sources(JSlice PRIVATE
     ${CORE_SOURCES}
