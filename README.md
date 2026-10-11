@@ -181,6 +181,8 @@ Chaque push sur `main` lance la compilation sur GitHub Actions et met à jour la
 
 ## Licence
 
-Polices intégrées : Instrument Serif et IBM Plex Mono (SIL Open Font License, voir `Resources/Fonts`).
-J-Slice utilise le framework [JUCE](https://juce.com) (licence AGPLv3 ou licence commerciale JUCE ;
-usage personnel gratuit). Si tu distribues le plugin, respecte les conditions de la licence JUCE.
+Logiciel propriétaire, tous droits réservés (voir `LICENSE`). J-Slice utilise le framework [JUCE](https://juce.com)
+sous la licence JUCE 8 (offre « Starter » gratuite jusqu'à 20 000 $ de revenus annuels, à vérifier dans le contrat JUCE),
+avec le SDK VST3 sous licence MIT (JUCE 8.0.15 et suivants). Les composants tiers et leurs licences sont listés
+dans `THIRD_PARTY_NOTICES.txt`, à livrer avec chaque version. Polices : Instrument Serif et IBM Plex Mono (SIL OFL).
+VST est une marque de Steinberg Media Technologies GmbH.

@@ -21,7 +21,7 @@ else()
     include(FetchContent)
     FetchContent_Declare(JUCE
         GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-        GIT_TAG 8.0.9
+        GIT_TAG 8.0.15  # 8.0.15+ bundles the VST3 SDK under the MIT licence
         GIT_SHALLOW TRUE)
     FetchContent_MakeAvailable(JUCE)
 endif()
