@@ -59,7 +59,20 @@ synchronisées au tempo d'Ableton.
 | Molette | changer de slice |
 | Shift + clic | verrouiller (gardé quand on régénère) |
 | Alt + clic | écouter |
-| Shift + clic droit | menu (slice, pitch, longueur, vélocité…) |
+| Shift + clic droit | menu (slice, pitch, longueur, vélocité, effets…) |
+| **Flèches gauche / droite** | **slice précédente / suivante sur le pas sélectionné** (le dernier pas cliqué) |
+
+#### Effets par pas
+Les onglets au-dessus de la grille choisissent ce que le clic modifie :
+- **NOTES** : édition normale des frappes.
+- **DELAY** / **REVERB** : clique ou glisse sur des pas pour envoyer **seulement ces frappes** dans
+  le delay ou la reverb (« throws » façon dub). L'effet s'allume tout seul. Sa **SOURCE**
+  (onglet SPACE) : *All* (tout le break), *Snares+marked* (snares + pas marqués) ou *Marked only*
+  (uniquement les pas marqués).
+- **LO-FI** : ces frappes seulement passent en 8 kHz / 5 bits.
+- **FILTER** : ces frappes seulement passent dans un filtre « téléphone ».
+- **CLEAR FX** retire l'effet du mode courant de tous les pas (en mode NOTES : tous les effets).
+- Dans la grille, des petits carrés colorés en bas à gauche d'un pas indiquent ses effets.
 
 - **L:64** avec **-** / **+** : longueur du pattern en pas (16 = 1 mesure ; shift = une mesure).
 - **FILL** (bouton à gauche de la ligne de fill) : éteint par défaut. Allumé, la ligne FILL remplace

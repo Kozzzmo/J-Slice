@@ -8,9 +8,13 @@ StepGrid::StepGrid (JSliceProcessor& p)
 {
     setTooltip ("Click: add / remove  |  right-click: add a REVERSED hit (or flip reverse)\n"
                 "Drag left / right: shorter / longer  |  drag up / down: re-triggers (x1 to x8)\n"
-                "Ctrl+drag: velocity  |  wheel: slice  |  shift+click: lock  |  alt+click: listen  |  shift+right-click: menu");
+                "Ctrl+drag: velocity  |  wheel or left / right arrows: slice of the selected step\n"
+                "Shift+click: lock  |  alt+click: listen  |  shift+right-click: menu\n"
+                "Effect modes (Delay, Reverb, Lo-fi, Filter): click or paint across steps to add / remove the effect");
     fillToggle.setTooltip ("Fill bar on / off (the FILL row replaces the last bar of every 2 / 4 / 8 bars)");
     fillToggle.onStateChange = [this] { repaint(); };
+    setWantsKeyboardFocus (true);
+    setMouseClickGrabsKeyboardFocus (true);
     addAndMakeVisible (fillToggle);
     refresh();
 }
@@ -145,6 +149,19 @@ void StepGrid::paint (juce::Graphics& g)
                     g.setColour (pl.hot.withMultipliedAlpha (a));
                     g.fillPath (tri);
                 }
+                // per-step effect badges
+                if (st.fx != 0)
+                {
+                    const Colour fxc[] = { pl.accent, pl.hat, pl.snare, pl.hot };
+                    float bx = rc.getX() + (st.reverse ? 12.0f : 3.0f);
+                    for (int b = 0; b < bc::kNumStepFx; ++b)
+                    {
+                        if ((st.fx & (1 << b)) == 0) continue;
+                        g.setColour (fxc[b].withMultipliedAlpha (a));
+                        g.fillRoundedRectangle (bx, rc.getBottom() - 7.0f, 5.0f, 5.0f, 1.0f);
+                        bx += 7.0f;
+                    }
+                }
                 if (st.pitch != 0)
                 {
                     g.setColour (pl.dim);
@@ -153,6 +170,27 @@ void StepGrid::paint (juce::Graphics& g)
                 }
             }
 
+            if (editMode > 0)
+            {
+                const uint8_t bit = (uint8_t) (1 << (editMode - 1));
+                if (st.on && (st.fx & bit) != 0)
+                {
+                    g.setColour (pl.accent.withAlpha (0.28f * a));
+                    g.fillRoundedRectangle (rc, 3.0f);
+                    g.setColour (pl.accent.withMultipliedAlpha (a));
+                    g.drawRoundedRectangle (rc.reduced (0.5f), 3.0f, 1.6f);
+                }
+                else if (st.on)
+                {
+                    g.setColour (pl.bg.withAlpha (0.35f));
+                    g.fillRoundedRectangle (rc, 3.0f);
+                }
+            }
+            if (idx == selected && hasKeyboardFocus (true))
+            {
+                g.setColour (pl.active);
+                g.drawRoundedRectangle (rc.expanded (2.0f), 4.0f, 1.4f);
+            }
             if (st.locked)
             {
                 g.setColour (pl.active);
@@ -189,7 +227,7 @@ void StepGrid::paintOverChildren (juce::Graphics& g)
 }
 
 //==============================================================================
-void StepGrid::addStep (int index, bool reversed)
+void StepGrid::addStep (int index, bool reversed, uint8_t fx)
 {
     if (kit == nullptr || kit->slices.empty()) return;
     const int abs = index >= bc::kMaxSteps ? (bc::kMaxSteps - 16 + index - bc::kMaxSteps) : index;
@@ -199,7 +237,8 @@ void StepGrid::addStep (int index, bool reversed)
     {
         s = bc::Step();
         s.on = true; s.slice = (int16_t) sl; s.role = cls; s.vel = 110; s.reverse = reversed;
-    });
+    }, true);
+    if (fx != 0) proc.modifyStep (index, [fx] (bc::Step& s) { s.fx = fx; }, false);
     proc.previewSlice (sl);
 }
 
@@ -211,6 +250,19 @@ void StepGrid::mouseDown (const juce::MouseEvent& e)
     downPos = e.getPosition();
     if (dragIndex < 0 || kit == nullptr || kit->slices.empty()) { dragIndex = -1; return; }
     const auto st = stepAt (dragIndex);
+    selected = dragIndex;
+    repaint();
+
+    if (editMode > 0 && ! e.mods.isPopupMenu() && ! e.mods.isShiftDown() && ! e.mods.isAltDown())
+    {
+        const uint8_t bit = (uint8_t) (1 << (editMode - 1));
+        fxTarget = ! (st.on && (st.fx & bit) != 0);
+        fxPainting = true;
+        fxPainted.clear();
+        paintFx (dragIndex, true);
+        dragMode = DragMode::None;
+        return;
+    }
 
     if (e.mods.isPopupMenu())
     {
@@ -234,6 +286,12 @@ void StepGrid::mouseDown (const juce::MouseEvent& e)
 
 void StepGrid::mouseDrag (const juce::MouseEvent& e)
 {
+    if (fxPainting)
+    {
+        const int idx = indexAt (e.getPosition());
+        if (idx >= 0) paintFx (idx, false);
+        return;
+    }
     if (dragIndex < 0 || ! dragStart.on) return;
     const int dx = e.x - downPos.x, dy = e.y - downPos.y;
 
@@ -272,6 +330,13 @@ void StepGrid::mouseDrag (const juce::MouseEvent& e)
 
 void StepGrid::mouseUp (const juce::MouseEvent&)
 {
+    if (fxPainting)
+    {
+        fxPainting = false;
+        fxPainted.clear();
+        dragIndex = -1;
+        return;
+    }
     if (dragIndex >= 0 && dragMode == DragMode::Pending)
     {
         const auto& st = stepAt (dragIndex);
@@ -291,13 +356,54 @@ void StepGrid::mouseUp (const juce::MouseEvent&)
 void StepGrid::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
 {
     const int idx = indexAt (e.getPosition());
-    if (idx < 0 || kit == nullptr || kit->slices.empty() || ! stepAt (idx).on) return;
-    const int dir = (w.deltaY > 0.0f) ? 1 : -1;
+    if (idx < 0) return;
+    selected = idx;
+    stepSlice (idx, w.deltaY > 0.0f ? 1 : -1);
+}
+
+void StepGrid::ensureSendOn (uint8_t bit)
+{
+    // marking a step for the delay / reverb switches that effect on, otherwise nothing would be heard
+    const char* id = bit == bc::FxDelay ? PID::dlyOn : (bit == bc::FxReverb ? PID::revOn : nullptr);
+    if (id == nullptr) return;
+    if (auto* p = proc.apvts.getParameter (id))
+        if (p->getValue() < 0.5f) p->setValueNotifyingHost (1.0f);
+}
+
+void StepGrid::paintFx (int index, bool undoable)
+{
+    if (fxPainted.count (index) > 0 || editMode <= 0) return;
+    fxPainted.insert (index);
+    const uint8_t bit = (uint8_t) (1 << (editMode - 1));
+    const auto& st = stepAt (index);
+    if (! st.on)
+    {
+        if (fxTarget && undoable) addStep (index, false, bit);   // only the first click creates hits
+        if (fxTarget) ensureSendOn (bit);
+        return;
+    }
+    const bool target = fxTarget;
+    proc.modifyStep (index, [bit, target] (bc::Step& s) { s.fx = (uint8_t) (target ? (s.fx | bit) : (s.fx & ~bit)); }, undoable);
+    if (target) ensureSendOn (bit);
+}
+
+void StepGrid::stepSlice (int index, int dir)
+{
+    if (index < 0 || kit == nullptr || kit->slices.empty() || ! stepAt (index).on) return;
     const int n = (int) kit->slices.size();
-    const int sl = (stepAt (idx).slice + dir + n) % n;
+    const int sl = (stepAt (index).slice + dir + n) % n;
     const auto cls = kit->slices[(size_t) sl].cls;
-    proc.modifyStep (idx, [sl, cls] (bc::Step& s) { s.slice = (int16_t) sl; s.role = cls; });
+    proc.modifyStep (index, [sl, cls] (bc::Step& s) { s.slice = (int16_t) sl; s.role = cls; });
     proc.previewSlice (sl);
+}
+
+bool StepGrid::keyPressed (const juce::KeyPress& k)
+{
+    if (selected < 0) return false;
+    if (k.getKeyCode() == juce::KeyPress::leftKey)  { stepSlice (selected, -1); return true; }
+    if (k.getKeyCode() == juce::KeyPress::rightKey) { stepSlice (selected, 1);  return true; }
+    if (k.getKeyCode() == juce::KeyPress::escapeKey) { selected = -1; repaint(); return true; }
+    return false;
 }
 
 void StepGrid::showStepMenu (int index)
@@ -327,6 +433,9 @@ void StepGrid::showStepMenu (int index)
     PopupMenu vel;
     for (int v : { 127, 110, 90, 70, 50, 30 }) vel.addItem (400 + v, String (v), true, st.vel == v);
     m.addSubMenu ("Velocity", vel);
+    PopupMenu fx;
+    for (int b = 0; b < bc::kNumStepFx; ++b) fx.addItem (500 + b, bc::stepFxName (b), true, (st.fx & (1 << b)) != 0);
+    m.addSubMenu ("Effects", fx);
     m.addSeparator();
     m.addItem (2, "Lock", true, st.locked);
     m.addItem (3, "Listen", st.on);
@@ -360,6 +469,12 @@ void StepGrid::showStepMenu (int index)
         else if (r == 2)  pr.modifyStep (index, [] (bc::Step& s) { s.locked = ! s.locked; });
         else if (r == 3)  pr.previewSlice (st.slice);
         else if (r == 4)  pr.modifyStep (index, [] (bc::Step& s) { s = bc::Step(); });
+        else if (r >= 500)
+        {
+            const uint8_t bit = (uint8_t) (1 << (r - 500));
+            pr.modifyStep (index, [ensureOn, bit] (bc::Step& s) { ensureOn (s); s.fx ^= bit; });
+            self.ensureSendOn (bit);
+        }
         else if (r >= 400) { const int v = r - 400; pr.modifyStep (index, [ensureOn, v] (bc::Step& s) { ensureOn (s); s.vel = (uint8_t) v; }); }
         else if (r >= 300) { const float gvals[] = { 1.0f, 0.75f, 0.5f, 0.25f, 0.1f }; const float gt = gvals[r - 300]; pr.modifyStep (index, [ensureOn, gt] (bc::Step& s) { ensureOn (s); s.gate = gt; }); }
         else if (r >= 200) { const int p = r - 200 - 12; pr.modifyStep (index, [ensureOn, p] (bc::Step& s) { ensureOn (s); s.pitch = (int8_t) p; }); }

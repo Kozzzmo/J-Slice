@@ -23,7 +23,8 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     crushPhase = 0.0f;
     compEnv = 0.0f;
 
-    sendBuf.setSize (2, maxBlock, false, true, true);
+    dlyBuf.setSize (2, maxBlock, false, true, true);
+    revBuf.setSize (2, maxBlock, false, true, true);
     wetBuf.setSize (2, maxBlock, false, true, true);
 
     const auto dlyLen = (size_t) (sr * 4.0) + 8;
@@ -135,6 +136,7 @@ void Engine::collectSeqEvents (double ppqStart, int startSample, int numSamples,
             else if (roll > 1)
                 e.gateSamples = (int64_t) juce::jmax (32.0, distanceToNext (k, j, roll, p) * samplesPerStep);
             e.uiStep = ui;
+            e.fx = st->fx;
             pushEvent (e);
         }
     }
@@ -168,6 +170,9 @@ void Engine::trigger (const Ev& e, const EngineParams& p, double hostBpm)
     v->active = true;
     v->slice = e.slice;
     v->send = sl.cls == HitClass::Snare || sl.cls == HitClass::Ghost;
+    v->fx = e.fx;
+    v->lfPhase = 1.0f; v->lfL = v->lfR = 0.0f;
+    v->hpL = v->hpR = v->xpL = v->xpR = v->lpL = v->lpR = 0.0f;
     v->reverse = e.reverse;
     v->regionStart = juce::jlimit<int64_t> (0, len, sl.start);
     v->regionEnd = (tail == 0 && ! e.reverse) ? len : juce::jlimit<int64_t> (0, len, sl.end);
@@ -248,9 +253,18 @@ void Engine::renderVoices (juce::AudioBuffer<float>& out, int start, int end)
     const float* srcR = buf.getReadPointer (buf.getNumChannels() > 1 ? 1 : 0);
     float* oL = out.getWritePointer (0);
     float* oR = out.getWritePointer (out.getNumChannels() > 1 ? 1 : 0);
-    float* sL = sendBuf.getWritePointer (0);
-    float* sR = sendBuf.getWritePointer (1);
+    float* dL = dlyBuf.getWritePointer (0);
+    float* dR = dlyBuf.getWritePointer (1);
+    float* rL = revBuf.getWritePointer (0);
+    float* rR = revBuf.getWritePointer (1);
     const float releaseLen = (float) (0.003 * sr);
+    const int dlySrc = cur != nullptr ? cur->dlySrc : 1;
+    const int revSrc = cur != nullptr ? cur->revSrc : 1;
+    // per-hit lo-fi : 8 kHz / 5 bits ; per-hit filter : "telephone" band-pass 700 Hz - 2.8 kHz
+    const float lfStep = (float) (8000.0 / sr);
+    const float lfQ = 16.0f;
+    const float hpA = (float) std::exp (-juce::MathConstants<double>::twoPi * 700.0 / sr);
+    const float lpC = 1.0f - (float) std::exp (-juce::MathConstants<double>::twoPi * 2800.0 / sr);
 
     for (auto& v : voices)
     {
@@ -335,9 +349,27 @@ void Engine::renderVoices (juce::AudioBuffer<float>& out, int start, int end)
             }
 
             const float g = v.gain * v.env * v.decayEnv;
-            oL[i] += l * g;
-            oR[i] += r * g;
-            if (v.send) { sL[i] += l * g; sR[i] += r * g; }
+            float vl = l * g, vr = r * g;
+            if (v.fx & FxLofi)
+            {
+                v.lfPhase += lfStep;
+                if (v.lfPhase >= 1.0f) { v.lfPhase -= 1.0f; v.lfL = vl; v.lfR = vr; }
+                vl = std::round (v.lfL * lfQ) / lfQ;
+                vr = std::round (v.lfR * lfQ) / lfQ;
+            }
+            if (v.fx & FxFilter)
+            {
+                v.hpL = hpA * (v.hpL + vl - v.xpL); v.xpL = vl;
+                v.hpR = hpA * (v.hpR + vr - v.xpR); v.xpR = vr;
+                v.lpL += lpC * (v.hpL - v.lpL);
+                v.lpR += lpC * (v.hpR - v.lpR);
+                vl = std::tanh (v.lpL * 2.2f);
+                vr = std::tanh (v.lpR * 2.2f);
+            }
+            oL[i] += vl;
+            oR[i] += vr;
+            if ((v.fx & FxDelay) || (dlySrc == 1 && v.send))  { dL[i] += vl; dR[i] += vr; }
+            if ((v.fx & FxReverb) || (revSrc == 1 && v.send)) { rL[i] += vl; rR[i] += vr; }
 
             if ((headInc >= 0.0 && head >= (double) v.regionEnd) || (headInc < 0.0 && head < (double) v.regionStart))
             {
@@ -436,8 +468,8 @@ void Engine::applyFx (juce::AudioBuffer<float>& out, const EngineParams& p, doub
     wetBuf.clear (1, 0, n);
     float* wL = wetBuf.getWritePointer (0);
     float* wR = wetBuf.getWritePointer (1);
-    const float* sendL = sendBuf.getReadPointer (0);
-    const float* sendR = sendBuf.getReadPointer (1);
+    const float* sendL = dlyBuf.getReadPointer (0);
+    const float* sendR = dlyBuf.getReadPointer (1);
 
     if (p.dlyOn)
     {
@@ -492,9 +524,8 @@ void Engine::applyFx (juce::AudioBuffer<float>& out, const EngineParams& p, doub
         rp.wetLevel = 1.0f;
         rp.dryLevel = 0.0f;
         reverb.setParameters (rp);
-        // reuse the send buffer as the reverb input (it is not needed any more after the delay)
-        float* inL = sendBuf.getWritePointer (0);
-        float* inR = sendBuf.getWritePointer (1);
+        float* inL = revBuf.getWritePointer (0);
+        float* inR = revBuf.getWritePointer (1);
         if (p.revSrc == 0)
         {
             juce::FloatVectorOperations::copy (inL, L, n);
@@ -523,14 +554,18 @@ void Engine::process (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, con
     const int n = out.getNumSamples();
     out.clear();
     numEvents = 0;
-    if (sendBuf.getNumSamples() < n)
+    if (dlyBuf.getNumSamples() < n)
     {
         // host sent a bigger block than announced : grow (rare, not real-time safe but better than crashing)
-        sendBuf.setSize (2, n, false, true, true);
+        dlyBuf.setSize (2, n, false, true, true);
+        revBuf.setSize (2, n, false, true, true);
         wetBuf.setSize (2, n, false, true, true);
     }
-    sendBuf.clear (0, 0, n);
-    sendBuf.clear (1, 0, n);
+    dlyBuf.clear (0, 0, n);
+    dlyBuf.clear (1, 0, n);
+    revBuf.clear (0, 0, n);
+    revBuf.clear (1, 0, n);
+    cur = &p;
 
     {
         const juce::SpinLock::ScopedTryLockType tl (kitLock);
@@ -629,6 +664,7 @@ void Engine::process (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, con
     uiSamplePos.store (newest != nullptr ? (newest->mode >= TempoCyclic ? newest->anchor : newest->pos) : -1.0);
 
     applyFx (out, p, bpm);
+    cur = nullptr;
 }
 
 } // namespace bc

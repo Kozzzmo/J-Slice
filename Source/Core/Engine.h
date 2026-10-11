@@ -31,7 +31,7 @@ struct EngineParams
     bool  driveOn  = false; float drive = 0.3f;
     bool  compOn   = false; float compAmt = 0.5f; float compAtkMs = 3.0f; float compRelMs = 80.0f; float compMix = 0.5f;
     // space
-    bool  dlyOn  = false; int dlyTime = 3; float dlyFb = 0.4f; float dlyTone = 0.6f; bool dlyPing = true; float dlyMix = 0.25f; int dlySrc = 0;
+    bool  dlyOn  = false; int dlyTime = 3; float dlyFb = 0.4f; float dlyTone = 0.6f; bool dlyPing = true; float dlyMix = 0.25f; int dlySrc = 1;   // src : 0 all, 1 snares + marked steps, 2 marked steps only
     bool  revOn  = false; float revSize = 0.45f; float revDamp = 0.5f; float revWidth = 1.0f; float revMix = 0.2f; int revSrc = 1;
     float outDb  = 0.0f;
 };
@@ -87,13 +87,17 @@ private:
         float pitch = 0.0f;
         int64_t gateSamples = std::numeric_limits<int64_t>::max();
         int   uiStep = -1;
+        uint8_t fx = 0;
     };
 
     struct Voice
     {
         bool    active = false;
         int     slice = -1;
-        bool    send = false;                     // snare / ghost : feeds the "snares only" sends
+        bool    send = false;                     // snare / ghost : feeds the "snares" sends
+        uint8_t fx = 0;                           // per-step effects (StepFx)
+        float   lfPhase = 0.0f, lfL = 0.0f, lfR = 0.0f;                    // per-hit lo-fi
+        float   hpL = 0.0f, hpR = 0.0f, xpL = 0.0f, xpR = 0.0f, lpL = 0.0f, lpR = 0.0f;   // per-hit filter
         int64_t regionStart = 0, regionEnd = 0;
         bool    reverse = false;
         double  pos = 0.0, inc = 1.0;
@@ -143,7 +147,8 @@ private:
     int numEvents = 0;
 
     // FX state
-    juce::AudioBuffer<float> sendBuf, wetBuf;
+    juce::AudioBuffer<float> dlyBuf, revBuf, wetBuf;
+    const EngineParams* cur = nullptr;   // parameters of the block being rendered
     float crushPhase = 0.0f, holdL = 0.0f, holdR = 0.0f;
     juce::dsp::StateVariableTPTFilter<float> filter;
     juce::SmoothedValue<float> cutoffSmooth, outGainSmooth;

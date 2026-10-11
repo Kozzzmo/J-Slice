@@ -148,6 +148,7 @@ public:
     void undo();
     void redo();
     void clearLocks();
+    void clearStepFx (uint8_t mask);   // removes these per-step effects from every step
     void requestFill()                { engine.requestFill(); }
     void previewSlice (int i)         { engine.previewSlice (i); }
     void applyStyle (int index);

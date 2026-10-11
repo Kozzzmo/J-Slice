@@ -312,6 +312,50 @@ int main (int argc, char** argv)
         check (ok && finite && peak > 0.05f && peak < 4.0f, juce::String ("stretch mode ") + juce::String (mode) + " + FX render");
     }
 
+    // per-step effects : a delay "throw" on one hit, lo-fi and filter on single hits
+    {
+        auto render = [&] (uint8_t fx, const juce::String& name) -> juce::AudioBuffer<float>
+        {
+            Pattern p;
+            int snare = 0;
+            for (int i = 0; i < (int) kit->slices.size(); ++i) if (kit->slices[(size_t) i].cls == HitClass::Snare) { snare = i; break; }
+            p.steps[0].on = true; p.steps[0].slice = (int16_t) snare; p.steps[0].vel = 127; p.steps[0].fx = fx;
+            EngineParams ep; ep.patternSteps = 32; ep.tailMode = 1; ep.dlyOn = true; ep.dlySrc = 2; ep.revOn = true; ep.revSrc = 2;
+            ep.dlyTime = 4; ep.dlyFb = 0.5f; ep.dlyMix = 0.6f; ep.revMix = 0.9f; ep.revSize = 0.85f;
+            auto f = outDir.getChildFile ("stepfx_" + name + ".wav");
+            Exporter::renderAudio (kit, p, ep, 2, 172.0, 44100.0, f);
+            juce::AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (f));
+            juce::AudioBuffer<float> b (2, (int) rd->lengthInSamples);
+            rd->read (&b, 0, b.getNumSamples(), 0, true, true);
+            return b;
+        };
+        auto tailRms = [] (const juce::AudioBuffer<float>& b)
+        {
+            const int start = b.getNumSamples() / 4, len = b.getNumSamples() / 4;   // 2nd half of bar 1 : the hit itself is over
+            return b.getRMSLevel (0, start, len);
+        };
+        const auto dry = render (0, "none");
+        const auto dly = render (FxDelay, "delay");
+        const auto rev = render (FxReverb, "reverb");
+        const auto lofi = render (FxLofi, "lofi");
+        const auto filt = render (FxFilter, "filter");
+        std::printf ("  tail rms : dry %.4f, delay throw %.4f, reverb throw %.4f\n", tailRms (dry), tailRms (dly), tailRms (rev));
+        check (tailRms (dly) > tailRms (dry) * 4.0f + 0.002f, "per-step delay throw");
+        check (tailRms (rev) > tailRms (dry) * 4.0f + 0.0008f, "per-step reverb throw");
+        auto diff = [] (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
+        {
+            double d = 0.0;
+            for (int i = 0; i < juce::jmin (a.getNumSamples(), b.getNumSamples()); ++i) d += std::abs (a.getSample (0, i) - b.getSample (0, i));
+            return d;
+        };
+        check (diff (dry, lofi) > 1.0 && diff (dry, filt) > 1.0, "per-step lo-fi and filter change the hit");
+        auto p2 = Pattern::fromString (Pattern().toString());
+        Pattern q; q.steps[5].on = true; q.steps[5].fx = FxDelay | FxFilter;
+        check (Pattern::fromString (q.toString()) == q, "per-step effects saved with the pattern");
+        juce::ignoreUnused (p2);
+    }
+
     // clean stretch keeps the break length in time : a 1-bar chunk at 172 BPM must last one bar
     {
         Pattern p;

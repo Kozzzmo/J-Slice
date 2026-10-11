@@ -216,6 +216,57 @@ int main (int argc, char** argv)
                 const auto& st = proc->getPattern().steps[(size_t) offCol];
                 check (st.on && st.reverse, "right click adds a reversed step");
             }
+            // arrow keys change the slice of the selected step
+            if (onCol >= 0)
+            {
+                auto c0 = centre (onCol);
+                grid->refresh();
+                grid->mouseDown (makeEvent (*grid, c0, c0, juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::shiftModifier), 1, false));
+                grid->mouseUp (makeEvent (*grid, c0, c0, juce::ModifierKeys(), 1, false));   // shift-click : lock toggle + select
+                proc->modifyStep (onCol, [] (bc::Step& st) { st.locked = false; });
+                const int s0 = proc->getPattern().steps[(size_t) onCol].slice;
+                grid->refresh();
+                grid->keyPressed (juce::KeyPress (juce::KeyPress::rightKey));
+                grid->refresh();
+                const int s1 = proc->getPattern().steps[(size_t) onCol].slice;
+                grid->keyPressed (juce::KeyPress (juce::KeyPress::leftKey));
+                grid->refresh();
+                grid->keyPressed (juce::KeyPress (juce::KeyPress::leftKey));
+                const int s2 = proc->getPattern().steps[(size_t) onCol].slice;
+                const int n = (int) proc->getKit()->slices.size();
+                std::printf ("  arrow keys : slice %d -> %d -> %d\n", s0 + 1, s1 + 1, s2 + 1);
+                check (s1 == (s0 + 1) % n && s2 == (s0 - 1 + n) % n, "left / right arrows change the slice of the selected step");
+            }
+
+            // effect mode : paint delay throws across a row
+            {
+                grid->setEditMode (1);
+                if (auto* dp = proc->apvts.getParameter (PID::dlyOn)) dp->setValueNotifyingHost (0.0f);
+                grid->refresh();
+                auto a = centre (0), b = centre (15);
+                grid->mouseDown (makeEvent (*grid, a, a, left, 1, false));
+                for (int c = 1; c < 16; ++c)
+                {
+                    grid->refresh();
+                    grid->mouseDrag (makeEvent (*grid, centre (c), a, left, 1, true));
+                }
+                grid->mouseUp (makeEvent (*grid, b, a, juce::ModifierKeys(), 1, true));
+                int marked = 0, on = 0;
+                for (int c = 0; c < 16; ++c)
+                {
+                    const auto& st = proc->getPattern().steps[(size_t) c];
+                    on += st.on;
+                    marked += st.on && (st.fx & bc::FxDelay) != 0;
+                }
+                std::printf ("  delay throws painted : %d / %d hits\n", marked, on);
+                check (marked == on && on > 0, "painting in Delay mode marks every hit of the row");
+                check (proc->apvts.getRawParameterValue (PID::dlyOn)->load() > 0.5f, "marking a delay throw switches the delay on");
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+                snapshot (*grid, outDir.getChildFile ("ui_fx_mode.png"));
+                grid->setEditMode (0);
+                grid->refresh();
+            }
+
             juce::MessageManager::getInstance()->runDispatchLoopUntil (100);
             snapshot (*ed, outDir.getChildFile ("ui_after_gestures.png"));
         }

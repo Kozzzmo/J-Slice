@@ -4,7 +4,7 @@ using namespace ui;
 
 namespace
 {
-    constexpr int kW = 1180, kH = 880;
+    constexpr int kW = 1180, kH = 910;
 
     juce::String pct (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; }
 }
@@ -199,6 +199,34 @@ JSliceEditor::JSliceEditor (JSliceProcessor& p)
     seedEdit.onReturnKey = [this] { proc.generate ((uint32_t) seedEdit.getText().getLargeIntValue()); unfocusAllComponents(); };
     addAndMakeVisible (seedEdit);
 
+    // per-step effect edit modes
+    {
+        const char* names[] = { "Notes", "Delay", "Reverb", "Lo-fi", "Filter" };
+        const char* tips[] = {
+            "Edit the hits (add, length, re-triggers, reverse...)",
+            "Paint delay throws : click or drag across steps. Those hits are sent into the delay (SPACE tab)",
+            "Paint reverb throws : click or drag across steps. Those hits are sent into the reverb (SPACE tab)",
+            "Paint lo-fi hits : 8 kHz / 5-bit crunch on those hits only",
+            "Paint filtered hits : telephone band-pass on those hits only" };
+        for (int i = 0; i < 5; ++i)
+        {
+            auto* b = modeBtns.add (new TextButton (names[i]));
+            b->setClickingTogglesState (true);
+            b->setRadioGroupId (78);
+            b->setTooltip (tips[i]);
+            b->onClick = [this, i] { grid.setEditMode (i); };
+            addAndMakeVisible (b);
+        }
+        modeBtns[0]->setToggleState (true, dontSendNotification);
+        clearFxBtn.setTooltip ("Remove the effect of the current mode from every step (in Notes mode : every effect)");
+        clearFxBtn.onClick = [this]
+        {
+            const int m = grid.getEditMode();
+            proc.clearStepFx (m == 0 ? (uint8_t) 0x0f : (uint8_t) (1 << (m - 1)));
+        };
+        addAndMakeVisible (clearFxBtn);
+    }
+
     // ---------------------------------------------------------------- generator panel
     styleBox.addItemList (bc::getStyleNames(), 1);
     styleBox.setTooltip ("Loads the style's settings and generates a new pattern");
@@ -382,9 +410,9 @@ void JSliceEditor::paint (juce::Graphics& g)
     g.drawText ("BREAK SLICER / GENERATOR", 196, 34, 130, 14, Justification::centredLeft);
 
     drawPanel (g, { 8, 66, kW - 16, 262 });
-    drawPanel (g, { 8, 336, 860, 330 });
-    drawPanel (g, { 876, 336, 296, 330 });
-    drawPanel (g, { 8, 674, kW - 16, 198 });
+    drawPanel (g, { 8, 336, 860, 360 });
+    drawPanel (g, { 876, 336, 296, 360 });
+    drawPanel (g, { 8, 704, kW - 16, 198 });
 
     // captions of the plain combos
     g.setFont (mono (11.0f));
@@ -443,24 +471,29 @@ void JSliceEditor::resized()
     redoBtn.setBounds (550, 346, 58, 26);
     clearLocksBtn.setBounds (612, 346, 76, 26);
     seedEdit.setBounds (740, 346, 120, 26);
-    grid.setBounds (16, 382, 846, 278);
+    {
+        int x = 16;
+        for (auto* b : modeBtns) { b->setBounds (x, 380, 88, 26); x += 92; }
+        clearFxBtn.setBounds (x + 6, 380, 96, 26);
+    }
+    grid.setBounds (16, 412, 846, 278);
 
     // ---- generator panel
     styleBox.setBounds (888, 360, 272, 32);
     generateBtn.setBounds (888, 400, 272, 44);
     mutateBtn.setBounds (888, 450, 132, 30);
     fillBtn.setBounds (1028, 450, 132, 30);
-    complexityKnob->setBounds (884, 492, 94, 166);
-    energyKnob->setBounds (977, 492, 94, 166);
-    chaosKnob->setBounds (1070, 492, 94, 166);
+    complexityKnob->setBounds (884, 500, 94, 186);
+    energyKnob->setBounds (977, 500, 94, 186);
+    chaosKnob->setBounds (1070, 500, 94, 186);
 
     // ---- tabs
-    tabGen.setBounds (16, 682, 104, 26);
-    tabPlay.setBounds (124, 682, 96, 26);
-    tabColour.setBounds (224, 682, 88, 26);
-    tabSpace.setBounds (316, 682, 80, 26);
-    skinBtn.setBounds (kW - 16 - 150, 682, 150, 26);
-    const Rectangle<int> pageR (16, 714, kW - 32, 150);
+    tabGen.setBounds (16, 712, 104, 26);
+    tabPlay.setBounds (124, 712, 96, 26);
+    tabColour.setBounds (224, 712, 88, 26);
+    tabSpace.setBounds (316, 712, 80, 26);
+    skinBtn.setBounds (kW - 16 - 150, 712, 150, 26);
+    const Rectangle<int> pageR (16, 744, kW - 32, 150);
     for (auto* p : { &pageGen, &pagePlay, &pageColour, &pageSpace }) p->setBounds (pageR);
 
     auto place = [this] (const char* id, Rectangle<int> r) { if (auto* c = byId[id]) c->setBounds (r); };
@@ -506,12 +539,12 @@ void JSliceEditor::resized()
     {
         pageSpace.groups = { { { 0, 0, 500, H }, "" }, { { 508, 0, 500, H }, "" }, { { 1016, 0, pageR.getWidth() - 1016, H }, "" } };
         place (PID::dlyOn, { 10, 8, 96, 22 });
-        place (PID::dlyTime, { 10, 40, 110, 44 });
-        place (PID::dlySrc, { 10, 92, 110, 44 });
+        place (PID::dlyTime, { 10, 40, 116, 44 });
+        place (PID::dlySrc, { 10, 92, 116, 44 });
         place (PID::dlyPing, { 132, 8, 96, 22 });
         knobRow ({ PID::dlyFb, PID::dlyTone, PID::dlyMix }, 130, 34, 120);
         place (PID::revOn, { 518, 8, 96, 22 });
-        place (PID::revSrc, { 518, 40, 110, 44 });
+        place (PID::revSrc, { 518, 40, 116, 44 });
         knobRow ({ PID::revSize, PID::revDamp, PID::revWidth, PID::revMix }, 634, 34, 92);
         knobRow ({ PID::output }, 1022, 24, pageR.getWidth() - 1028);
     }

@@ -54,6 +54,17 @@ struct Slice
 };
 
 //==============================================================================
+// Per-step effects (bit mask). Delay / reverb = "throws" into the send effects,
+// lo-fi and filter are processed on that hit only.
+enum StepFx : uint8_t { FxDelay = 1, FxReverb = 2, FxLofi = 4, FxFilter = 8 };
+constexpr int kNumStepFx = 4;
+
+inline const char* stepFxName (int bit)
+{
+    static const char* n[] = { "Delay", "Reverb", "Lo-fi", "Filter" };
+    return n[juce::jlimit (0, kNumStepFx - 1, bit)];
+}
+
 struct Step
 {
     bool     on       = false;
@@ -65,6 +76,7 @@ struct Step
     float    gate     = 1.0f;   // 1 = until next event, < 1 shortens the hit
     bool     locked   = false;
     HitClass role     = HitClass::Kick;
+    uint8_t  fx       = 0;      // StepFx bit mask
 
     bool operator== (const Step&) const = default;
 };
@@ -88,7 +100,7 @@ struct Pattern
         {
             out << (s.on ? 1 : 0) << "," << s.slice << "," << (int) s.vel << "," << (s.reverse ? 1 : 0) << ","
                 << (int) s.pitch << "," << (int) s.roll << "," << juce::String ((double) s.gate, 9) << ","
-                << (s.locked ? 1 : 0) << "," << (int) s.role << ";";
+                << (s.locked ? 1 : 0) << "," << (int) s.role << "," << (int) s.fx << ";";
         };
         for (auto& s : steps) writeStep (s);
         out << "|";
@@ -120,6 +132,7 @@ struct Pattern
                 st.gate    = juce::jlimit (0.05f, 1.0f, f[6].getFloatValue());
                 st.locked  = f[7].getIntValue() != 0;
                 st.role    = (HitClass) juce::jlimit (0, kNumClasses - 1, f[8].getIntValue());
+                st.fx      = f.size() > 9 ? (uint8_t) (f[9].getIntValue() & 0x0f) : (uint8_t) 0;
                 dest[i] = st;
             }
         };

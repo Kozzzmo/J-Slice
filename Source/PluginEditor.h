@@ -83,6 +83,8 @@ private:
     ui::ParamChoice fillEvery;
     juce::TextButton undoBtn { "Undo" }, redoBtn { "Redo" }, clearLocksBtn { "-Locks" };
     juce::TextEditor seedEdit;
+    juce::OwnedArray<juce::TextButton> modeBtns;   // Notes, Delay, Reverb, Lo-fi, Filter
+    juce::TextButton clearFxBtn { "Clear FX" };
 
     // generator panel
     juce::ComboBox styleBox;
