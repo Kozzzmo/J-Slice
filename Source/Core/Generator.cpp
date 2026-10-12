@@ -512,6 +512,50 @@ namespace
     }
 
     //==========================================================================
+    // Final density pass. The running break alone already plays every slice it contains, so the
+    // density knob must also remove hits from it : at the style's usual densities (>= 0.6) nothing
+    // changes; below, non-anchor hits fade out; near zero only one or two anchor hits per bar remain.
+    void applyDensity (Ctx& c, Step* bar, int firstAbsStep, int numSteps)
+    {
+        const float d = c.s.density;
+        if (d >= 0.6f) return;
+        const float keep = std::pow (d / 0.6f, 1.5f);
+        const int maxAnchors = d < 0.04f ? 1 : (d < 0.15f ? 2 : 99);
+        int anchorsKept = 0;
+        bool kickKept = false, snareKept = false;
+        for (int i = 0; i < numSteps; ++i)
+        {
+            auto& st = bar[i];
+            if (! st.on || st.locked) continue;
+            const int t32 = (firstAbsStep + i) % 32;
+            if ((t32 % 16) == 0) { anchorsKept = 0; kickKept = snareKept = false; }   // new bar
+            const bool anchor = c.isAnchor (t32) && (st.role == HitClass::Kick || st.role == HitClass::Snare);
+            if (anchor && maxAnchors < 99)
+            {
+                // one kick, then one snare (the downbeat and the backbeat), nothing else
+                bool& seen = st.role == HitClass::Kick ? kickKept : snareKept;
+                if (seen || anchorsKept >= maxAnchors) { st = Step(); continue; }
+                seen = true; ++anchorsKept;
+                st.roll = 1; st.reverse = false;
+                continue;
+            }
+            if (anchor) continue;
+            if (maxAnchors < 99 || ! c.chance (keep)) st = Step();
+        }
+
+        // near zero, a bar must still say something : the main kick on its downbeat
+        if (maxAnchors < 99)
+            for (int b0 = 0; b0 < numSteps; b0 += kStepsPerBar)
+            {
+                bool any = false;
+                for (int i = b0; i < juce::jmin (numSteps, b0 + kStepsPerBar); ++i) any = any || bar[i].on;
+                if (any || bar[b0].locked) continue;
+                const int sl = c.pick (HitClass::Kick);
+                if (sl >= 0) bar[b0] = c.makeStep (sl, HitClass::Kick, 118);
+            }
+    }
+
+    //==========================================================================
     void genFill (Ctx& c, Pattern& p)
     {
         auto& f = p.fill;
@@ -620,6 +664,9 @@ Pattern Generator::generate (const Kit& kit, const GenSettings& s, uint32_t seed
 
     genFill (c, p);
 
+    for (int b = 0; b < kMaxBars; ++b) applyDensity (c, &p.at (b, 0), b * kStepsPerBar, kStepsPerBar);
+    applyDensity (c, p.fill.data(), kStepsPerBar, kStepsPerBar);
+
     if (previous != nullptr)
     {
         for (size_t i = 0; i < p.steps.size(); ++i)
@@ -643,6 +690,8 @@ void Generator::mutate (Pattern& p, const Kit& kit, const GenSettings& s, uint32
     for (int b = 0; b < kMaxBars; ++b)
         mutateSteps (c, &p.at (b, 0), b * kStepsPerBar, kStepsPerBar, opsPerBar);
     mutateSteps (c, p.fill.data(), kStepsPerBar, kStepsPerBar, opsPerBar);
+    for (int b = 0; b < kMaxBars; ++b) applyDensity (c, &p.at (b, 0), b * kStepsPerBar, kStepsPerBar);
+    applyDensity (c, p.fill.data(), kStepsPerBar, kStepsPerBar);
     const int n = (int) kit.slices.size();
     for (auto& st : p.steps) if (st.slice >= n) st.slice = (int16_t) (n - 1);
     for (auto& st : p.fill)  if (st.slice >= n) st.slice = (int16_t) (n - 1);

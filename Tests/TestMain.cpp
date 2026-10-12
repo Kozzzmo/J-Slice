@@ -242,6 +242,38 @@ int main (int argc, char** argv)
         }
     }
 
+    // density : at zero only one or two hits per bar; density follows the knob
+    {
+        for (int si = 0; si < (int) getStyles().size(); ++si)
+        {
+            const auto& style = getStyles()[(size_t) si];
+            GenSettings gs = style.defaults;
+            int maxPerBar = 0, minPerBar = 99;
+            double hits[3] = {};
+            const float dens[3] = { 0.0f, 0.3f, gs.density };
+            for (int k = 0; k < 3; ++k)
+            {
+                gs.density = dens[k];
+                for (uint32_t seed = 1; seed <= 10; ++seed)
+                {
+                    auto p = Generator::generate (*kit, gs, seed, nullptr);
+                    Generator::mutate (p, *kit, gs, seed + 7);
+                    for (int b = 0; b < kMaxBars; ++b)
+                    {
+                        int n = 0;
+                        for (int i = 0; i < kStepsPerBar; ++i) n += p.at (b, i).on;
+                        hits[k] += n;
+                        if (k == 0) { maxPerBar = juce::jmax (maxPerBar, n); minPerBar = juce::jmin (minPerBar, n); }
+                    }
+                }
+                hits[k] /= 10.0 * kMaxBars;
+            }
+            std::printf ("  %-22s hits/bar : density 0 -> %.1f, 0.3 -> %.1f, default -> %.1f\n", style.name, hits[0], hits[1], hits[2]);
+            check (maxPerBar <= 2 && minPerBar >= 1, juce::String ("density 0 = 1-2 hits per bar : ") + style.name);
+            check (hits[0] < hits[1] && hits[1] < hits[2], juce::String ("density increases hits : ") + style.name);
+        }
+    }
+
     // pattern serialisation round trip
     {
         auto p = Generator::generate (*kit, getStyles()[0].defaults, 42, nullptr);

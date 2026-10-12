@@ -16,10 +16,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout JSliceProcessor::createLayou
     };
     const auto& d = getStyles()[0].defaults;
 
-    // macros : 0 = the style's own settings, 100 % = pushed to the maximum
-    l.add (pct (PID::complexity, "Complexity", 0.0f));
-    l.add (pct (PID::energy, "Energy", 0.0f));
-    l.add (pct (PID::chaos, "Chaos", 0.0f));
+    // macros : -100 (left) = related settings at zero, 0 (centre) = the style's own settings, +100 = pushed to the maximum
+    auto macro = [] (const char* id, const char* name)
+    {
+        return std::make_unique<AudioParameterFloat> (ParameterID { id, 1 }, name, NormalisableRange<float> (0.0f, 1.0f), 0.5f,
+                                                      AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+                                                      { const int n = roundToInt ((v - 0.5f) * 200.0f); return (n > 0 ? "+" : "") + String (n); }));
+    };
+    l.add (macro (PID::complexity, "Complexity"));
+    l.add (macro (PID::energy, "Energy"));
+    l.add (macro (PID::chaos, "Chaos"));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::style, 1 }, "Style", getStyleNames(), 0));
 
     l.add (pct (PID::density, "Density", d.density));
@@ -192,29 +198,35 @@ EngineParams JSliceProcessor::currentEngineParams() const
 
 GenSettings JSliceProcessor::currentGenSettings() const
 {
-    // macros : 0 = the style's own detail settings, 1 = every related setting pushed to the maximum
+    // macros : 0 = every related setting at zero, 0.5 = the style's own detail settings,
+    // 1 = every related setting pushed to the maximum
     const float c = pv (PID::complexity), e = pv (PID::energy), x = pv (PID::chaos);
     auto cl = [] (float v) { return juce::jlimit (0.0f, 1.0f, v); };
-    auto push = [&cl] (float v, float m) { return cl (v + (1.0f - v) * m); };
+    auto push = [&cl] (float v, float m, float w)
+    {
+        if (m < 0.5f) return cl (v * m * 2.0f);                     // left half : fade to zero
+        return cl (v + (1.0f - v) * (m - 0.5f) * 2.0f * w);        // right half : push up
+    };
 
     GenSettings s;
     s.style      = (int) pv (PID::style);
-    s.density    = push (pv (PID::density), e * 0.8f);
-    s.ghosts     = push (pv (PID::ghosts), e);
-    s.hats       = push (pv (PID::hats), e * 0.8f);
-    s.chop       = push (pv (PID::chop), c);
-    s.cut16      = push (pv (PID::cut16), c * 0.7f);
-    s.rolls      = push (pv (PID::rolls), c * 0.8f);
+    s.density    = push (pv (PID::density), e, 0.8f);
+    s.ghosts     = push (pv (PID::ghosts), e, 1.0f);
+    s.hats       = push (pv (PID::hats), e, 0.8f);
+    s.chop       = push (pv (PID::chop), c, 1.0f);
+    s.cut16      = push (pv (PID::cut16), c, 0.7f);
+    s.rolls      = push (pv (PID::rolls), c, 0.8f);
     const int rep = (int) pv (PID::maxRepeats);
-    s.maxRepeats = juce::jlimit (1, 4, rep + (int) std::round (c * (float) (4 - rep)));
-    s.fillAmount = push (pv (PID::fillAmt), c);
-    s.stutter    = push (pv (PID::stutter), x * 0.8f);
-    s.reverse    = push (pv (PID::reverse), x * 0.5f);
-    s.pitchProb  = push (pv (PID::pitchProb), x * 0.5f);
+    s.maxRepeats = c < 0.5f ? juce::jmax (1, (int) std::round ((float) rep * c * 2.0f))
+                            : juce::jlimit (1, 4, rep + (int) std::round ((c - 0.5f) * 2.0f * (float) (4 - rep)));
+    s.fillAmount = push (pv (PID::fillAmt), c, 1.0f);
+    s.stutter    = push (pv (PID::stutter), x, 0.8f);
+    s.reverse    = push (pv (PID::reverse), x, 0.5f);
+    s.pitchProb  = push (pv (PID::pitchProb), x, 0.5f);
     s.pitchRange = (int) pv (PID::pitchRange);
-    s.gateProb   = push (pv (PID::gateProb), x * 0.4f);
-    s.variation  = push (pv (PID::variation), x);
-    s.backbone   = cl (pv (PID::backbone) * (1.0f - 0.6f * x));
+    s.gateProb   = push (pv (PID::gateProb), x, 0.4f);
+    s.variation  = push (pv (PID::variation), x, 1.0f);
+    s.backbone   = cl (pv (PID::backbone) * (1.0f - 0.6f * juce::jmax (0.0f, x - 0.5f) * 2.0f));
     s.humanize   = pv (PID::humanize);
     return s;
 }

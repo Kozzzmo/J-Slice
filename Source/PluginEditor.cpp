@@ -241,7 +241,7 @@ JSliceEditor::JSliceEditor (JSliceProcessor& p)
     mutateBtn.onClick = [this] { proc.mutate(); };
     fillBtn.onClick = [this] { proc.requestFill(); };
 
-    auto macroFmt = [] (double v) { return String (roundToInt (v * 100.0)); };
+    auto macroFmt = [] (double v) { const int n = roundToInt ((v - 0.5) * 200.0); return (n > 0 ? "+" : "") + String (n); };
     complexityKnob = std::make_unique<Knob> (s, PID::complexity, "Complexity");
     energyKnob = std::make_unique<Knob> (s, PID::energy, "Energy");
     chaosKnob = std::make_unique<Knob> (s, PID::chaos, "Chaos");
@@ -250,9 +250,9 @@ JSliceEditor::JSliceEditor (JSliceProcessor& p)
         k->format = macroFmt;
         addAndMakeVisible (k);
     }
-    complexityKnob->slider.setTooltip ("More cutting : chops, 16th cuts, rolls, repeats, bigger fills (0 = the style as is)");
-    energyKnob->slider.setTooltip ("More hits : density, ghost notes, hats (0 = the style as is)");
-    chaosKnob->slider.setTooltip ("More surprises : stutters, reversed hits, pitch jumps, short hits, variations (0 = the style as is)");
+    complexityKnob->slider.setTooltip ("More cutting : chops, 16th cuts, rolls, repeats, bigger fills (left = none, centre = the style as is, right = maximum)");
+    energyKnob->slider.setTooltip ("More hits : density, ghost notes, hats (left = none, centre = the style as is, right = maximum)");
+    chaosKnob->slider.setTooltip ("More surprises : stutters, reversed hits, pitch jumps, short hits, variations (left = none, centre = the style as is, right = maximum)");
 
     // ---------------------------------------------------------------- tabs
     for (auto* b : { &tabGen, &tabPlay, &tabColour, &tabSpace })
@@ -506,7 +506,7 @@ void JSliceEditor::resized()
 
     // GENERATOR
     {
-        pageGen.groups = { { { 0, 0, pageR.getWidth(), H }, "Generator details  -  the three macros push these further" } };
+        pageGen.groups = { { { 0, 0, pageR.getWidth(), H }, "Generator details  -  the three macros scale these down (left) or push them further (right)" } };
         const int w = (pageR.getWidth() - 16) / 16;
         knobRow ({ PID::density, PID::backbone, PID::ghosts, PID::hats, PID::chop, PID::cut16, PID::maxRepeats, PID::rolls,
                    PID::stutter, PID::reverse, PID::pitchProb, PID::pitchRange, PID::gateProb, PID::variation, PID::fillAmt, PID::humanize },
