@@ -363,11 +363,15 @@ void StepGrid::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
 
 void StepGrid::ensureSendOn (uint8_t bit)
 {
-    // marking a step for the delay / reverb switches that effect on, otherwise nothing would be heard
+    // marking a step for the delay / reverb switches that effect on, otherwise nothing would be heard,
+    // and makes it play on the marked steps only (not on every hit, not on every snare)
     const char* id = bit == bc::FxDelay ? PID::dlyOn : (bit == bc::FxReverb ? PID::revOn : nullptr);
+    const char* src = bit == bc::FxDelay ? PID::dlySrc : (bit == bc::FxReverb ? PID::revSrc : nullptr);
     if (id == nullptr) return;
     if (auto* p = proc.apvts.getParameter (id))
         if (p->getValue() < 0.5f) p->setValueNotifyingHost (1.0f);
+    if (auto* p = proc.apvts.getParameter (src))
+        if (p->getValue() < 0.99f) p->setValueNotifyingHost (1.0f);   // last choice = "Marked only"
 }
 
 void StepGrid::paintFx (int index, bool undoable)

@@ -91,13 +91,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout JSliceProcessor::createLayou
     l.add (pct (PID::dlyTone, "Delay tone", 0.55f));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::dlyPing, 1 }, "Ping-pong", true));
     l.add (pct (PID::dlyMix, "Delay level", 0.3f));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::dlySrc, 1 }, "Delay source", StringArray { "All", "Snares+marked", "Marked only" }, 1));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::dlySrc, 1 }, "Delay source", StringArray { "All", "Snares+marked", "Marked only" }, 2));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::revOn, 1 }, "Reverb on", false));
     l.add (pct (PID::revSize, "Reverb size", 0.45f));
     l.add (pct (PID::revDamp, "Reverb damping", 0.5f));
     l.add (pct (PID::revWidth, "Reverb width", 1.0f));
     l.add (pct (PID::revMix, "Reverb level", 0.25f));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::revSrc, 1 }, "Reverb source", StringArray { "All", "Snares+marked", "Marked only" }, 1));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::revSrc, 1 }, "Reverb source", StringArray { "All", "Snares+marked", "Marked only" }, 2));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { PID::output, 1 }, "Output", NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
                                                   AudioParameterFloatAttributes().withLabel ("dB")));
 

@@ -31,8 +31,8 @@ struct EngineParams
     bool  driveOn  = false; float drive = 0.3f;
     bool  compOn   = false; float compAmt = 0.5f; float compAtkMs = 3.0f; float compRelMs = 80.0f; float compMix = 0.5f;
     // space
-    bool  dlyOn  = false; int dlyTime = 3; float dlyFb = 0.4f; float dlyTone = 0.6f; bool dlyPing = true; float dlyMix = 0.25f; int dlySrc = 1;   // src : 0 all, 1 snares + marked steps, 2 marked steps only
-    bool  revOn  = false; float revSize = 0.45f; float revDamp = 0.5f; float revWidth = 1.0f; float revMix = 0.2f; int revSrc = 1;
+    bool  dlyOn  = false; int dlyTime = 3; float dlyFb = 0.4f; float dlyTone = 0.6f; bool dlyPing = true; float dlyMix = 0.25f; int dlySrc = 2;   // src : 0 all, 1 snares + marked steps, 2 marked steps only
+    bool  revOn  = false; float revSize = 0.45f; float revDamp = 0.5f; float revWidth = 1.0f; float revMix = 0.2f; int revSrc = 2;
     float outDb  = 0.0f;
 };
 
