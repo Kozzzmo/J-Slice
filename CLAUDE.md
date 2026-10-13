@@ -24,3 +24,13 @@ licence (free "Starter" tier up to USD 20k revenue a year).
 - Launch tracker (claude.ai artifact, tasks in its db collection `tasks`):
   https://claude.ai/artifact/3DAkMghoFDeC59JUTAcdkn — update task status with the ArtifactData tool when work
   from the list is done.
+
+## Versions and updates
+
+- Version: `project(J_SLICE VERSION x.y.z)` in `CMakeLists.txt` (= `JucePlugin_VersionString`); bump it and add a
+  `CHANGELOG.md` section when a change should be offered to installed copies.
+- Update check (`Source/UI/UpdateCheck.*`, owned by the processor, started by the editor): at most every 20 h
+  (settings `updAuto`, `updLast`, `updSkip`) it reads `releases/download/latest/update.txt`, a manifest signed with
+  the Kinetik update key (same format as KDSP-16 / KMSP-6, Monocypher in `Source/third_party`). No installer: the
+  logo click dialog opens the release page. The release job signs it with `tools/sign_update.py --tag latest` when
+  the secret `KINETIK_UPDATE_KEY` exists. JUCE has no HTTPS on Linux here (`JUCE_USE_CURL=0`): the check fails there.

@@ -137,10 +137,24 @@ jobs:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+
+      # signed manifest read by installed copies to offer the new version (needs the KINETIK_UPDATE_KEY secret)
+      - name: Signed update manifest
+        if: github.ref == 'refs/heads/main'
+        env:
+          KINETIK_UPDATE_KEY: ${{ secrets.KINETIK_UPDATE_KEY }}
+        run: |
+          if [ -z "$KINETIK_UPDATE_KEY" ]; then echo "::warning title=updates::KINETIK_UPDATE_KEY not set, no update.txt published"; exit 0; fi
+          pip install --quiet cryptography
+          V=$(sed -n 's/^project(J_SLICE VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          python3 tools/sign_update.py --product J-Slice --version "$V" --repo J-Slice --tag latest \
+            --changelog CHANGELOG.md --out dist/update.txt
+          cat dist/update.txt
 
       - name: Publish "latest" download (main branch)
         if: github.ref == 'refs/heads/main'
@@ -149,7 +163,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest dist/J-Slice-Windows.zip dist/J-Slice-macOS.zip \
+          gh release create latest dist/J-Slice-Windows.zip dist/J-Slice-macOS.zip $(ls dist/update.txt 2>/dev/null) \
             --title "J-Slice - latest build" \
             --notes "Automatic build of commit ${GITHUB_SHA::7}.
           Windows : unzip, copy J-Slice.vst3 to C:\\Program Files\\Common Files\\VST3, rescan plug-ins in Ableton Live.

@@ -54,6 +54,8 @@ private:
     void setBreakBpm (double bpm);
     void setBreakBars (int bars);
     void showError (const juce::String& msg);
+    void mouseUp (const juce::MouseEvent&) override;
+    void showUpdateDialog();
 
     ui::Knob& knob (juce::Component& page, const char* id, const juce::String& caption);
     ui::ParamChoice& choice (juce::Component& page, const char* id, const juce::String& caption);
@@ -105,6 +107,8 @@ private:
     juce::String errorText;
     int errorTicks = 0;
     int lastSteps = -1, lastFill = -1;
+    int lastUpdState = -1;
+    bool updWaiting = false;   // "Check now" pressed: show the result when it arrives
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JSliceEditor)
 };

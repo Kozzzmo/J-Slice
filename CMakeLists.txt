@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(J_SLICE VERSION 1.0.0 LANGUAGES C CXX)
+project(J_SLICE VERSION 1.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -74,7 +74,10 @@ target_sources(JSlice PRIVATE
     Source/UI/WaveformView.cpp
     Source/UI/StepGrid.cpp
     Source/UI/BrowserPanel.cpp
-    Source/UI/PatternBar.cpp)
+    Source/UI/PatternBar.cpp
+    Source/UI/UpdateCheck.cpp
+    Source/third_party/monocypher/monocypher.c
+    Source/third_party/monocypher/monocypher-ed25519.c)
 
 target_include_directories(JSlice PRIVATE Source)
 
@@ -102,12 +105,16 @@ endif()
 #==============================================================================
 if(JSLICE_BUILD_TESTS)
     juce_add_console_app(JSliceTests PRODUCT_NAME "JSliceTests")
-    target_sources(JSliceTests PRIVATE Tests/TestMain.cpp ${CORE_SOURCES})
+    target_sources(JSliceTests PRIVATE Tests/TestMain.cpp ${CORE_SOURCES}
+        Source/UI/UpdateCheck.cpp
+        Source/third_party/monocypher/monocypher.c
+        Source/third_party/monocypher/monocypher-ed25519.c)
     target_include_directories(JSliceTests PRIVATE Source)
     target_compile_definitions(JSliceTests PRIVATE ${COMMON_DEFINITIONS})
     target_link_libraries(JSliceTests
         PRIVATE
             juce::juce_audio_formats
+            juce::juce_data_structures
             juce::juce_dsp
         PUBLIC
             juce::juce_recommended_config_flags

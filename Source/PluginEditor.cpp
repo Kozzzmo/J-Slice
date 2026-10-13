@@ -342,6 +342,7 @@ JSliceEditor::JSliceEditor (JSliceProcessor& p)
     setSize (kW, kH);
     refreshAll();
     startTimerHz (30);
+    proc.updates().check (false);
 }
 
 JSliceEditor::~JSliceEditor()
@@ -409,8 +410,16 @@ void JSliceEditor::paint (juce::Graphics& g)
     g.setFont (mono (13.0f, true, 0.22f));
     g.drawText ("JSLC-16", 196, 14, 130, 18, Justification::centredLeft);
     g.setFont (mono (9.5f, true, 0.02f));
-    g.setColour (pl.dim);
-    g.drawText ("BREAK SLICER / GENERATOR", 196, 34, 130, 14, Justification::centredLeft);
+    if (proc.updates().getState() == upd::Checker::available)
+    {
+        g.setColour (pl.hot);
+        g.drawText ("UPDATE " + String (proc.updates().manifest().version) + " - CLICK", 196, 34, 200, 14, Justification::centredLeft);
+    }
+    else
+    {
+        g.setColour (pl.dim);
+        g.drawText ("BREAK SLICER / GENERATOR", 196, 34, 130, 14, Justification::centredLeft);
+    }
 
     drawPanel (g, { 8, 66, kW - 16, 222 });
     drawPanel (g, { 8, 296, 860, 400 });
@@ -625,6 +634,72 @@ void JSliceEditor::timerCallback()
     if (ep.patternSteps != lastSteps || ep.fillEvery != lastFill) { lastSteps = ep.patternSteps; lastFill = ep.fillEvery; grid.repaint(); }
 
     if (errorTicks > 0 && --errorTicks == 0) { errorText.clear(); repaint(); }
+
+    const int us = (int) proc.updates().getState();
+    if (us != lastUpdState)
+    {
+        lastUpdState = us;
+        repaint (0, 0, 420, 64);
+        if (updWaiting && us != upd::Checker::checking) { updWaiting = false; showUpdateDialog(); }
+    }
+}
+
+//==============================================================================
+void JSliceEditor::mouseUp (const juce::MouseEvent& e)
+{
+    if (e.getPosition().y < 62 && e.getPosition().x < 400) showUpdateDialog();
+}
+
+void JSliceEditor::showUpdateDialog()
+{
+    using namespace juce;
+    auto& u = proc.updates();
+    const auto cur = upd::Checker::currentVersion();
+    SafePointer<JSliceEditor> safe (this);
+
+    if (u.getState() == upd::Checker::available)
+    {
+        const auto m = u.manifest();
+        String msg;
+        if (! m.notes.empty()) msg << "New: " << String (m.notes) << "\n\n";
+        msg << "You have version " << cur << ". Download the new version from its release page and install it like "
+               "the first time (close your DAW first).";
+        AlertWindow::showAsync (MessageBoxOptions().withIconType (MessageBoxIconType::InfoIcon)
+                                    .withTitle ("J-Slice " + String (m.version) + " is available")
+                                    .withMessage (msg)
+                                    .withButton ("Open download page").withButton ("Skip this version").withButton ("Later")
+                                    .withAssociatedComponent (this),
+                                [safe] (int r)
+                                {
+                                    if (safe == nullptr) return;
+                                    if (r == 1) safe->proc.updates().openPage();
+                                    else if (r == 2) safe->proc.updates().skipThisVersion();
+                                    safe->repaint (0, 0, 420, 64);
+                                });
+        return;
+    }
+
+    String msg = "Version " + cur + ".\n\n";
+    switch (u.getState())
+    {
+        case upd::Checker::checking: msg << "Looking for a new version..."; break;
+        case upd::Checker::upToDate: msg << "You have the latest version."; break;
+        case upd::Checker::failed:   msg << "Could not reach the update server (or its answer was not genuine). Check your internet connection and try again."; break;
+        default:                     msg << "Click Check now to look for a new version."; break;
+    }
+    msg << "\n\nAutomatic check (once a day, nothing is sent): " << (u.autoCheck() ? "ON" : "OFF");
+    AlertWindow::showAsync (MessageBoxOptions().withIconType (MessageBoxIconType::NoIcon)
+                                .withTitle ("J-Slice updates")
+                                .withMessage (msg)
+                                .withButton ("Check now").withButton (u.autoCheck() ? "Turn automatic check off" : "Turn automatic check on").withButton ("Close")
+                                .withAssociatedComponent (this),
+                            [safe] (int r)
+                            {
+                                if (safe == nullptr) return;
+                                auto& up = safe->proc.updates();
+                                if (r == 1) { up.check (true); safe->updWaiting = true; safe->lastUpdState = -1; }
+                                else if (r == 2) { up.setAutoCheck (! up.autoCheck()); safe->showUpdateDialog(); }
+                            });
 }
 
 //==============================================================================

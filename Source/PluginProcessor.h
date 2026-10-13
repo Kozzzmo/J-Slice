@@ -5,6 +5,7 @@
 #include "Core/Analyzer.h"
 #include "Core/Generator.h"
 #include "Core/Engine.h"
+#include "UI/UpdateCheck.h"
 #include <functional>
 #include <optional>
 
@@ -186,6 +187,7 @@ public:
 
     // ---- global settings shared by every instance (favourite folders etc.)
     juce::PropertiesFile& settings()  { return *globalSettings; }
+    upd::Checker& updates()           { if (! updater) updater = std::make_unique<upd::Checker> (*globalSettings); return *updater; }
     juce::StringArray getFavourites() const;
     void setFavourites (const juce::StringArray& f);
     bool keepPatternOnLoad() const    { return globalSettings->getBoolValue ("keepPattern", true); }
@@ -238,6 +240,7 @@ private:
     std::shared_ptr<bool> alive = std::make_shared<bool> (true);
 
     std::unique_ptr<juce::PropertiesFile> globalSettings;
+    std::unique_ptr<upd::Checker> updater;   // after globalSettings: stopped before the settings go
     juce::AudioFormatManager formatManager;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JSliceProcessor)

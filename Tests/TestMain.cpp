@@ -8,6 +8,10 @@
 #include <cstdio>
 #include <cmath>
 #include <cstring>
+#include "UI/UpdateCheck.h"
+extern "C" {
+#include "third_party/monocypher/monocypher-ed25519.h"
+}
 
 using namespace bc;
 
@@ -436,6 +440,28 @@ int main (int argc, char** argv)
         const float rmsEnd = b.getRMSLevel (0, b.getNumSamples() - lastStep, lastStep);
         check (rmsEnd > 0.005f, "clean stretch fills the whole bar");
         f.deleteFile();
+    }
+
+    // update manifest: signature, product, tampering, version order
+    {
+        uint8_t seed[32], sk[64], pk[32], sig[64];
+        for (int i = 0; i < 32; ++i) seed[i] = (uint8_t) (100 + i);
+        crypto_ed25519_key_pair (sk, pk, seed);
+        auto sign = [&] (const std::string& body)
+        {
+            crypto_ed25519_sign (sig, sk, (const uint8_t*) body.data(), body.size());
+            return body + "signature: " + juce::String::toHexString (sig, 64, 0).toStdString() + "\n";
+        };
+        const auto good = sign ("KINETIK-UPDATE 1\nproduct: J-Slice\nversion: 1.2\nnotes: new\npage: https://github.com/Kozzzmo/J-Slice/releases/tag/latest\n");
+        const auto m = upd::parse (good, "J-Slice", pk);
+        check (m.valid && m.version == "1.2" && m.notes == "new", "update manifest accepted");
+        check (! upd::parse (good, "KDSP-16", pk).valid, "update manifest for another product refused");
+        auto bad = good; bad.replace (bad.find ("1.2"), 3, "9.9");
+        check (! upd::parse (bad, "J-Slice", pk).valid, "tampered update manifest refused");
+        check (! upd::parse (good, "J-Slice").valid, "update manifest signed by another key refused");
+        const auto evil = upd::parse (sign ("KINETIK-UPDATE 1\nproduct: J-Slice\nversion: 2\npage: https://evil.example/\n"), "J-Slice", pk);
+        check (evil.valid && evil.page.rfind ("https://github.com/Kozzzmo/", 0) == 0, "update page outside github.com/Kozzzmo replaced");
+        check (upd::newer ("1.10", "1.9") && upd::newer ("1.1", "1.0.9") && ! upd::newer ("1.1.0", "1.1"), "update version order");
     }
 
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL TESTS PASSED" : "SOME TESTS FAILED", failures, failures == 1 ? "" : "s");
