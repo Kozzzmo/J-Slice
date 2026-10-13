@@ -24,7 +24,7 @@ namespace
         neon.accent   = C (0xffaeb6ff);
         neon.onAccent = C (0xff10143a);
         neon.active   = C (0xffaeb6ff);
-        neon.hot      = C (0xffff86c8);
+        neon.hot      = C (0xffff4655);
         neon.kick     = C (0xffaeb6ff);
         neon.snare    = C (0xffff8cc8);
         neon.hat      = C (0xff7fe2d2);

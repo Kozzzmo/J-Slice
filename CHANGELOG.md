@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.1
+
+- NEON skin: the pink highlights are red
+
 ## 1.3.0
 
 - **Update check**: the plug-in tells you when a new version is out (at most once a day, nothing is sent; click the logo)
