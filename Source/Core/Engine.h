@@ -62,6 +62,8 @@ public:
     // ---- message thread
     void setKit (Kit::Ptr newKit);
     void setPattern (const Pattern& p, bool quantiseToBar);
+    void queuePattern (const Pattern& p);   // plays when the current pattern reaches its end (pattern change)
+    void cancelQueue()                 { const juce::SpinLock::ScopedLockType sl (patternLock); queuePending = false; }
 
     // ---- any thread
     void requestFill()                 { fillRequested.store (true); }
@@ -76,6 +78,8 @@ public:
     std::atomic<int>    uiSlice { -1 };
     std::atomic<double> uiSamplePos { -1.0 };   // position inside the source of the last voice
     std::atomic<int>    midiGenerate { 0 }, midiMutate { 0 }, midiUndo { 0 }, midiSeqToggle { 0 };
+    std::atomic<int>    swapCount { 0 };        // incremented each time a queued / new pattern takes over
+    std::atomic<int64_t> loopIndex { 0 };       // how many times the playing pattern has looped
 
 private:
     struct Ev
@@ -116,6 +120,8 @@ private:
     static constexpr int kMaxEvents = 1024;
 
     const Step* stepAt (int64_t k, const EngineParams& p) const;
+    int loopLen (const EngineParams& p) const { return juce::jlimit (1, kMaxSteps, pattern.length > 0 ? pattern.length : p.patternSteps); }
+    int64_t posInLoop (int64_t k, int len) const { int64_t r = (k - patStartK) % len; return r < 0 ? r + len : r; }
     bool isFillBar (int64_t bar, int fillEvery) const;
     double distanceToNext (int64_t k, int j, int roll, const EngineParams& p) const;
     void collectSeqEvents (double ppqStart, int startSample, int numSamples, double samplesPerPpq, const EngineParams& p);
@@ -132,8 +138,10 @@ private:
     bool kitPending = false;
     juce::SpinLock kitLock;
 
-    Pattern pattern, pendingPattern;
-    bool patternPending = false, patternQuantise = false;
+    Pattern pattern, pendingPattern, queuedPattern;
+    bool patternPending = false, queuePending = false;
+    int patternMode = 0;            // pendingPattern: 0 now, 1 next bar. queuedPattern: at the end of the current pattern
+    int64_t patStartK = 0;          // step at which the playing pattern started (its step 1)
     juce::SpinLock patternLock;
 
     std::atomic<bool> fillRequested { false }, stopRequested { false };

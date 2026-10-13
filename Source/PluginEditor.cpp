@@ -158,6 +158,9 @@ JSliceEditor::JSliceEditor (JSliceProcessor& p)
 
     // ---------------------------------------------------------------- sequencer
     addAndMakeVisible (grid);
+    addAndMakeVisible (patternBar);
+    patternBar.setTooltip ("Patterns: click a slot to edit it (while playing, it plays when the current pattern ends). "
+                           "CHAIN plays the list in a loop: + adds the edited slot, click a chip for more repeats, right-click removes it.");
     seqBtn.setTooltip ("Sequencer on / off. Off = play the slices from MIDI notes (C1 = slice 1)");
     addAndMakeVisible (seqBtn);
     stepsBox.attachTo (*s.getParameter (PID::steps), [] (double v) { return "L:" + String ((int) v); });
@@ -409,22 +412,22 @@ void JSliceEditor::paint (juce::Graphics& g)
     g.setColour (pl.dim);
     g.drawText ("BREAK SLICER / GENERATOR", 196, 34, 130, 14, Justification::centredLeft);
 
-    drawPanel (g, { 8, 66, kW - 16, 262 });
-    drawPanel (g, { 8, 336, 860, 360 });
-    drawPanel (g, { 876, 336, 296, 360 });
+    drawPanel (g, { 8, 66, kW - 16, 222 });
+    drawPanel (g, { 8, 296, 860, 400 });
+    drawPanel (g, { 876, 296, 296, 400 });
     drawPanel (g, { 8, 704, kW - 16, 198 });
 
     // captions of the plain combos
     g.setFont (mono (11.0f));
     g.setColour (pl.dim);
-    g.drawText ("SLICER", 16, 267, 120, 15, Justification::centredLeft);
-    g.drawText ("GRID", 272, 267, 80, 15, Justification::centredLeft);
-    g.drawText ("STYLE", 888, 343, 120, 15, Justification::centredLeft);
-    g.drawText ("SEED", 692, 346, 44, 26, Justification::centredRight);
+    g.drawText ("SLICER", 16, 227, 120, 15, Justification::centredLeft);
+    g.drawText ("GRID", 272, 227, 80, 15, Justification::centredLeft);
+    g.drawText ("STYLE", 888, 303, 120, 15, Justification::centredLeft);
+    g.drawText ("SEED", 692, 306, 44, 26, Justification::centredRight);
 
     g.setFont (serifItalic (27.0f));
     g.setColour (pl.text);
-    g.drawText ("Sequencer", 18, 344, 120, 30, Justification::centredLeft);
+    g.drawText ("Sequencer", 18, 304, 120, 30, Justification::centredLeft);
 
     if (errorText.isNotEmpty())
     {
@@ -449,43 +452,44 @@ void JSliceEditor::resized()
     bpmBox.setBounds (1078, 12, 86, 44);
 
     // ---- break display
-    wave.setBounds (16, 74, kW - 32, 186);
-    sliceMode.setBounds (16, 284, 120, 32);
-    sensBox.setBounds (144, 268, 120, 50);
-    gridDiv.setBounds (272, 284, 80, 32);
-    prerollBox.setBounds (360, 268, 104, 50);
-    keepPattern.setBounds (486, 288, 230, 22);
-    breakBpmBox.setBounds (760, 268, 116, 50);
-    breakBarsBox.setBounds (882, 268, 70, 50);
-    halfBtn.setBounds (960, 284, 44, 30);
-    dblBtn.setBounds (1008, 284, 44, 30);
-    detectBtn.setBounds (1058, 284, 106, 30);
+    wave.setBounds (16, 74, kW - 32, 146);
+    sliceMode.setBounds (16, 244, 120, 32);
+    sensBox.setBounds (144, 228, 120, 50);
+    gridDiv.setBounds (272, 244, 80, 32);
+    prerollBox.setBounds (360, 228, 104, 50);
+    keepPattern.setBounds (486, 248, 230, 22);
+    breakBpmBox.setBounds (760, 228, 116, 50);
+    breakBarsBox.setBounds (882, 228, 70, 50);
+    halfBtn.setBounds (960, 244, 44, 30);
+    dblBtn.setBounds (1008, 244, 44, 30);
+    detectBtn.setBounds (1058, 244, 106, 30);
 
     // ---- sequencer
-    seqBtn.setBounds (136, 346, 52, 26);
-    minusBtn.setBounds (198, 346, 26, 26);
-    stepsBox.setBounds (228, 340, 74, 34);
-    plusBtn.setBounds (306, 346, 26, 26);
-    fillEvery.setBounds (340, 346, 140, 26);
-    undoBtn.setBounds (488, 346, 58, 26);
-    redoBtn.setBounds (550, 346, 58, 26);
-    clearLocksBtn.setBounds (612, 346, 76, 26);
-    seedEdit.setBounds (740, 346, 120, 26);
+    seqBtn.setBounds (136, 306, 52, 26);
+    minusBtn.setBounds (198, 306, 26, 26);
+    stepsBox.setBounds (228, 300, 74, 34);
+    plusBtn.setBounds (306, 306, 26, 26);
+    fillEvery.setBounds (340, 306, 140, 26);
+    undoBtn.setBounds (488, 306, 58, 26);
+    redoBtn.setBounds (550, 306, 58, 26);
+    clearLocksBtn.setBounds (612, 306, 76, 26);
+    seedEdit.setBounds (740, 306, 120, 26);
     {
         int x = 16;
-        for (auto* b : modeBtns) { b->setBounds (x, 380, 88, 26); x += 92; }
-        clearFxBtn.setBounds (x + 6, 380, 96, 26);
+        for (auto* b : modeBtns) { b->setBounds (x, 340, 88, 26); x += 92; }
+        clearFxBtn.setBounds (x + 6, 340, 96, 26);
     }
-    grid.setBounds (16, 412, 846, 278);
+    patternBar.setBounds (16, 374, 846, 58);
+    grid.setBounds (16, 440, 846, 250);
 
     // ---- generator panel
-    styleBox.setBounds (888, 360, 272, 32);
-    generateBtn.setBounds (888, 400, 272, 44);
-    mutateBtn.setBounds (888, 450, 132, 30);
-    fillBtn.setBounds (1028, 450, 132, 30);
-    complexityKnob->setBounds (884, 500, 94, 186);
-    energyKnob->setBounds (977, 500, 94, 186);
-    chaosKnob->setBounds (1070, 500, 94, 186);
+    styleBox.setBounds (888, 320, 272, 32);
+    generateBtn.setBounds (888, 360, 272, 44);
+    mutateBtn.setBounds (888, 410, 132, 30);
+    fillBtn.setBounds (1028, 410, 132, 30);
+    complexityKnob->setBounds (884, 470, 94, 210);
+    energyKnob->setBounds (977, 470, 94, 210);
+    chaosKnob->setBounds (1070, 470, 94, 210);
 
     // ---- tabs
     tabGen.setBounds (16, 712, 104, 26);
@@ -567,6 +571,7 @@ void JSliceEditor::refreshAll()
     using namespace juce;
     wave.refresh();
     grid.refresh();
+    patternBar.repaint();
 
     auto k = proc.getKit();
     nameBox.name = (k != nullptr && k->audio != nullptr) ? k->audio->name : String ("no break loaded");
@@ -601,6 +606,7 @@ void JSliceEditor::timerCallback()
 {
     grid.tick();
     wave.tick();
+    patternBar.repaint();
     for (auto* b : { &swingBox, &pitchBox, &bpmBox, &stepsBox, &sensBox, &prerollBox, &breakBpmBox, &breakBarsBox }) b->refresh();
 
     const int style = (int) proc.apvts.getRawParameterValue (PID::style)->load();

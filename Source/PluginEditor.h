@@ -6,6 +6,7 @@
 #include "UI/WaveformView.h"
 #include "UI/StepGrid.h"
 #include "UI/BrowserPanel.h"
+#include "UI/PatternBar.h"
 #include <map>
 
 /** Tab page that draws its group frames behind the controls. */
@@ -77,6 +78,7 @@ private:
 
     // sequencer
     StepGrid grid;
+    PatternBar patternBar { proc };
     ui::ParamToggle seqBtn;
     juce::TextButton minusBtn { "-" }, plusBtn { "+" };
     ui::ValueBox stepsBox { "Length" };

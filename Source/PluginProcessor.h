@@ -159,6 +159,24 @@ public:
     double getHostBpm() const         { return hostBpm.load(); }
     bool   isRunning() const          { return running.load(); }
 
+    // ---- pattern slots (A01..A16) and chain
+    static constexpr int kSlots = 16;
+    struct ChainItem { int slot = 0; int repeats = 1; };
+    int  getEditSlot() const          { return editSlot; }
+    int  getPlaySlot() const          { return playSlot; }
+    int  getQueuedSlot() const        { return queuedSlot; }
+    bool slotUsed (int i) const;
+    void selectSlot (int i);          // edit this slot; while playing (chain off) it plays when the current pattern ends
+    void copySlot();
+    void pasteSlot();
+    void clearSlot();
+    bool hasSlotClip() const          { return slotClip != nullptr; }
+    const std::vector<ChainItem>& getChain() const { return chain; }
+    void setChain (std::vector<ChainItem> c);
+    bool isChainOn() const            { return chainOn; }
+    void setChainOn (bool on);
+    int  getChainPos() const          { return chainPos; }
+
     juce::File exportMidi();
     juce::File exportAudio();
 
@@ -187,8 +205,22 @@ private:
     bc::Kit::Ptr kit;
     bc::AnalysisResult analysis;
     bc::SlicerSettings slicerSettings;
-    bc::Pattern pattern;
+    bc::Pattern pattern;              // the slot being edited (= slots[editSlot].pattern)
     std::vector<bc::Pattern> undoStack, redoStack;
+
+    struct Slot { bc::Pattern pattern; juce::NamedValueSet settings; bc::Kit::Ptr madeFor; };
+    std::array<Slot, kSlots> slots;
+    int editSlot = 0, playSlot = 0, queuedSlot = -1;
+    std::unique_ptr<Slot> slotClip;
+    std::vector<ChainItem> chain;
+    bool chainOn = false;
+    int chainPos = 0, chainReps = 0, lastSwap = 0;
+    juce::int64 lastLoop = -1;
+    void captureSettings (Slot& s) const;
+    void applySettings (const Slot& s);
+    bc::Pattern slotPattern (int i);  // slot pattern, remapped to the current break if needed
+    void queueSlot (int i);
+    void updateSlots();               // timer: pattern changes, chain
     juce::CriticalSection stateLock;
 
     std::atomic<double> lastBpm { 172.0 }, hostBpm { 0.0 };

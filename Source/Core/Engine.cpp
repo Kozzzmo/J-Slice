@@ -51,7 +51,14 @@ void Engine::setPattern (const Pattern& p, bool quantiseToBar)
     const juce::SpinLock::ScopedLockType sl (patternLock);
     pendingPattern = p;
     patternPending = true;
-    patternQuantise = quantiseToBar;
+    patternMode = quantiseToBar ? 1 : 0;
+}
+
+void Engine::queuePattern (const Pattern& p)
+{
+    const juce::SpinLock::ScopedLockType sl (patternLock);
+    queuedPattern = p;
+    queuePending = true;
 }
 
 //==============================================================================
@@ -65,14 +72,14 @@ const Step* Engine::stepAt (int64_t k, const EngineParams& p) const
     if (k < 0) return nullptr;
     const int64_t bar = k / kStepsPerBar;
     if (isFillBar (bar, p.fillEvery)) return &pattern.fill[(size_t) (k % kStepsPerBar)];
-    const int len = juce::jlimit (1, kMaxSteps, p.patternSteps);
-    return &pattern.steps[(size_t) (k % len)];
+    const int len = loopLen (p);
+    return &pattern.steps[(size_t) posInLoop (k, len)];
 }
 
 double Engine::distanceToNext (int64_t k, int j, int roll, const EngineParams& p) const
 {
     if (j < roll - 1) return 1.0 / roll;
-    const int len = juce::jlimit (1, kMaxSteps, p.patternSteps);
+    const int len = loopLen (p);
     for (int m = 1; m <= len + kStepsPerBar; ++m)
     {
         auto* st = stepAt (k + m, p);
@@ -103,7 +110,7 @@ void Engine::collectSeqEvents (double ppqStart, int startSample, int numSamples,
     const double samplesPerStep = samplesPerPpq / 4.0;
     const double swingOff = juce::jlimit (0.0f, 1.0f, p.swing) / 3.0;
     const int nSlices = (int) kit->slices.size();
-    const int len = juce::jlimit (1, kMaxSteps, p.patternSteps);
+    const int len = loopLen (p);
 
     for (int64_t k = kFirst; k <= kLast; ++k)
     {
@@ -116,7 +123,7 @@ void Engine::collectSeqEvents (double ppqStart, int startSample, int numSamples,
         const int roll = juce::jlimit (1, kMaxRoll, (int) st->roll);
 
         const bool fillBar = st >= pattern.fill.data() && st < pattern.fill.data() + kStepsPerBar;
-        const int ui = fillBar ? kMaxSteps + (int) (k % kStepsPerBar) : (int) (k % len);
+        const int ui = fillBar ? kMaxSteps + (int) (k % kStepsPerBar) : (int) posInLoop (k, len);
 
         for (int j = 0; j < roll; ++j)
         {
@@ -577,18 +584,27 @@ void Engine::process (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, con
         }
     }
 
-    bool patternWaiting = false;
+    bool barWaiting = false, queueWaiting = false;
     {
         const juce::SpinLock::ScopedTryLockType tl (patternLock);
-        if (tl.isLocked() && patternPending)
+        if (tl.isLocked())
         {
-            if (! patternQuantise || ! t.playing) { pattern = pendingPattern; patternPending = false; }
-            else patternWaiting = true;
+            if (patternPending)
+            {
+                if (patternMode == 0 || ! t.playing) { pattern = pendingPattern; patternPending = false; }
+                else barWaiting = true;
+            }
+            if (queuePending)
+            {
+                if (! t.playing) { pattern = queuedPattern; queuePending = false; patStartK = 0; swapCount.fetch_add (1); }
+                else queueWaiting = true;
+            }
         }
     }
 
     if (stopRequested.exchange (false)) releaseAll (5.0f);
     if (wasPlaying && ! t.playing) releaseAll (5.0f);
+    if (! wasPlaying && t.playing) patStartK = 0;
     wasPlaying = t.playing;
 
     const double bpm = t.bpm > 1.0 ? t.bpm : 120.0;
@@ -624,25 +640,47 @@ void Engine::process (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, con
     // ---- sequencer
     if (t.playing && p.seqOn && t.ppq >= 0.0)
     {
+        // a new version of the pattern can wait for the next bar; a queued pattern waits for the end of this one
         int split = n;
-        if (patternWaiting)
+        bool splitIsQueue = false;
+        int64_t switchK = -1;
+        if (queueWaiting)
         {
-            const double nextBar = (std::floor (t.ppq / 4.0) + 1.0) * 4.0;
-            const double sToBar = (nextBar - t.ppq) * samplesPerPpq;
-            if (sToBar < (double) n) split = juce::jmax (0, (int) std::ceil (sToBar));
+            const int len = loopLen (p);
+            const double rel = t.ppq * 4.0 - (double) patStartK;
+            switchK = patStartK + (int64_t) std::ceil (rel / len - 1e-9) * len;
+            const double sTo = (switchK / 4.0 - t.ppq) * samplesPerPpq;
+            if (sTo < (double) n) { split = juce::jmax (0, (int) std::ceil (sTo)); splitIsQueue = true; }
+        }
+        if (barWaiting)
+        {
+            const double sTo = ((std::floor (t.ppq / 4.0) + 1.0) * 4.0 - t.ppq) * samplesPerPpq;
+            if (sTo < (double) split) { split = juce::jmax (0, (int) std::ceil (sTo)); splitIsQueue = false; }
         }
         collectSeqEvents (t.ppq, 0, split, samplesPerPpq, p);
         if (split < n)
         {
             const juce::SpinLock::ScopedTryLockType tl (patternLock);
-            if (tl.isLocked() && patternPending) { pattern = pendingPattern; patternPending = false; }
+            if (tl.isLocked())
+            {
+                if (splitIsQueue && queuePending)
+                {
+                    pattern = queuedPattern; queuePending = false;
+                    patStartK = switchK;
+                    patternPending = false;          // the queued pattern replaces any pending edit of the old one
+                    swapCount.fetch_add (1);
+                }
+                else if (! splitIsQueue && patternPending) { pattern = pendingPattern; patternPending = false; }
+            }
             collectSeqEvents (t.ppq + split / samplesPerPpq, split, n - split, samplesPerPpq, p);
         }
 
         const int64_t kNow = (int64_t) std::floor ((t.ppq + n / samplesPerPpq) * 4.0);
         const int64_t bar = kNow / kStepsPerBar;
-        const int len = juce::jlimit (1, kMaxSteps, p.patternSteps);
-        uiStep.store (isFillBar (bar, p.fillEvery) ? kMaxSteps + (int) (kNow % kStepsPerBar) : (int) (kNow % len));
+        const int len = loopLen (p);
+        const int64_t rel = kNow - patStartK;
+        loopIndex.store (rel >= 0 ? rel / len : -1);
+        uiStep.store (isFillBar (bar, p.fillEvery) ? kMaxSteps + (int) (kNow % kStepsPerBar) : (int) posInLoop (kNow, len));
     }
     else if (! t.playing)
     {

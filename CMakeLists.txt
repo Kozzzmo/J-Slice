@@ -73,7 +73,8 @@ target_sources(JSlice PRIVATE
     Source/UI/Widgets.cpp
     Source/UI/WaveformView.cpp
     Source/UI/StepGrid.cpp
-    Source/UI/BrowserPanel.cpp)
+    Source/UI/BrowserPanel.cpp
+    Source/UI/PatternBar.cpp)
 
 target_include_directories(JSlice PRIVATE Source)
 

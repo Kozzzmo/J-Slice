@@ -7,6 +7,9 @@ licence (free "Starter" tier up to USD 20k revenue a year).
 
 - CI: `.github/workflows/build.yml` (Windows, macOS universal + auval, Linux tests + pluginval); every push to
   `main` republishes the `latest` pre-release.
+- Patterns: 16 slots A01..A16 (`PluginProcessor` `slots`, each = steps + loop length + generator settings) and a
+  CHAIN; a slot clicked while playing is queued in the engine (`Engine::queuePattern`) and starts when the playing
+  pattern ends (`patStartK` = its step 1). UI: `Source/UI/PatternBar`.
 - Never bundle or demo copyrighted breaks (Amen, Think, Funky Drummer…): the user loads their own files.
 
 ## Working with the owner (read first)

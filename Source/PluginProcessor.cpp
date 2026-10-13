@@ -295,6 +295,7 @@ void JSliceProcessor::parameterChanged (const juce::String& id, float value)
 
 void JSliceProcessor::timerCallback()
 {
+    updateSlots();
     if (genRequests.exchange (0) > 0) generate();
     if (mutRequests.exchange (0) > 0) mutate();
     fillRequests.store (0);
@@ -487,9 +488,192 @@ void JSliceProcessor::setPattern (const Pattern& p, bool undoable)
     {
         const juce::ScopedLock sl (stateLock);
         pattern = p;
+        if (pattern.length <= 0) pattern.length = juce::jlimit (1, kMaxSteps, (int) pv (PID::steps));
+        slots[(size_t) editSlot].pattern = pattern;
+        slots[(size_t) editSlot].madeFor = kit;
     }
-    engine.setPattern (pattern, pv (PID::quantize) > 0.5f && hostPlaying.load());
+    if (editSlot == playSlot)
+        engine.setPattern (pattern, pv (PID::quantize) > 0.5f && hostPlaying.load());
+    else if (editSlot == queuedSlot)
+        engine.queuePattern (pattern);
     sendChangeMessage();
+}
+
+//==============================================================================
+// Pattern slots
+namespace
+{
+    const char* const kSlotParams[] = { PID::style, PID::complexity, PID::energy, PID::chaos, PID::density, PID::backbone,
+                                        PID::ghosts, PID::hats, PID::chop, PID::cut16, PID::rolls, PID::stutter, PID::reverse,
+                                        PID::pitchProb, PID::pitchRange, PID::gateProb, PID::variation, PID::fillAmt,
+                                        PID::maxRepeats, PID::humanize, PID::swing, PID::fillOn, PID::fillEvery };
+}
+
+bool JSliceProcessor::slotUsed (int i) const
+{
+    if (i < 0 || i >= kSlots) return false;
+    const auto& p = i == editSlot ? pattern : slots[(size_t) i].pattern;
+    for (auto& st : p.steps) if (st.on) return true;
+    return false;
+}
+
+void JSliceProcessor::captureSettings (Slot& s) const
+{
+    for (auto* id : kSlotParams)
+        if (auto* prm = apvts.getParameter (id))
+            s.settings.set (id, prm->convertFrom0to1 (prm->getValue()));
+}
+
+void JSliceProcessor::applySettings (const Slot& s)
+{
+    for (auto* id : kSlotParams)
+        if (auto* v = s.settings.getVarPointer (id))
+            if (auto* prm = apvts.getParameter (id))
+                prm->setValueNotifyingHost (prm->convertTo0to1 ((float) *v));
+}
+
+Pattern JSliceProcessor::slotPattern (int i)
+{
+    auto& sl = slots[(size_t) i];
+    if (kit != nullptr && sl.madeFor != nullptr && sl.madeFor != kit && ! sl.madeFor->slices.empty())
+    {
+        const int len = sl.pattern.length;
+        sl.pattern = Generator::remap (sl.pattern, *sl.madeFor, *kit);
+        sl.pattern.length = len;
+        sl.madeFor = kit;
+    }
+    if (sl.pattern.length <= 0) sl.pattern.length = juce::jlimit (1, kMaxSteps, (int) pv (PID::steps));
+    return sl.pattern;
+}
+
+void JSliceProcessor::queueSlot (int i)
+{
+    queuedSlot = i;
+    engine.queuePattern (slotPattern (i));
+}
+
+void JSliceProcessor::selectSlot (int i)
+{
+    i = juce::jlimit (0, kSlots - 1, i);
+    if (i == editSlot && queuedSlot < 0) return;
+    captureSettings (slots[(size_t) editSlot]);
+    slots[(size_t) editSlot].pattern = pattern;
+    editSlot = i;
+    applySettings (slots[(size_t) i]);
+    {
+        const juce::ScopedLock sl (stateLock);
+        pattern = slotPattern (i);
+    }
+    if (auto* prm = apvts.getParameter (PID::steps))
+        prm->setValueNotifyingHost (prm->convertTo0to1 ((float) pattern.length));
+    undoStack.clear();
+    redoStack.clear();
+    if (! chainOn)
+    {
+        if (running.load())
+        {
+            if (i == playSlot) { queuedSlot = -1; engine.cancelQueue(); }   // back to the playing one: cancel the change
+            else queueSlot (i);
+        }
+        else { playSlot = i; queuedSlot = -1; engine.setPattern (pattern, false); }
+    }
+    sendChangeMessage();
+}
+
+void JSliceProcessor::copySlot()
+{
+    slotClip = std::make_unique<Slot> (slots[(size_t) editSlot]);
+    slotClip->pattern = pattern;
+    captureSettings (*slotClip);
+    sendChangeMessage();
+}
+
+void JSliceProcessor::pasteSlot()
+{
+    if (slotClip == nullptr) return;
+    slots[(size_t) editSlot].settings = slotClip->settings;
+    applySettings (*slotClip);
+    auto p = slotClip->pattern;
+    if (kit != nullptr && slotClip->madeFor != nullptr && slotClip->madeFor != kit && ! slotClip->madeFor->slices.empty())
+    {
+        const int len = p.length;
+        p = Generator::remap (p, *slotClip->madeFor, *kit);
+        p.length = len;
+    }
+    setPattern (p, true);
+    if (auto* prm = apvts.getParameter (PID::steps))
+        prm->setValueNotifyingHost (prm->convertTo0to1 ((float) pattern.length));
+}
+
+void JSliceProcessor::clearSlot()
+{
+    Pattern p;
+    p.length = pattern.length;
+    setPattern (p, true);
+}
+
+void JSliceProcessor::setChain (std::vector<ChainItem> c)
+{
+    for (auto& it : c) { it.slot = juce::jlimit (0, kSlots - 1, it.slot); it.repeats = juce::jlimit (1, 16, it.repeats); }
+    chain = std::move (c);
+    if (chain.empty()) chainOn = false;
+    chainPos = juce::jlimit (0, juce::jmax (0, (int) chain.size() - 1), chainPos);
+    sendChangeMessage();
+}
+
+void JSliceProcessor::setChainOn (bool on)
+{
+    chainOn = on && ! chain.empty();
+    chainPos = 0; chainReps = 0; lastLoop = -1;
+    if (chainOn)
+    {
+        const int first = chain[0].slot;
+        if (running.load()) queueSlot (first);
+        else
+        {
+            selectSlot (first);
+            playSlot = first; queuedSlot = -1; engine.setPattern (pattern, false);
+        }
+    }
+    else if (queuedSlot >= 0) { queuedSlot = -1; engine.cancelQueue(); }
+    sendChangeMessage();
+}
+
+void JSliceProcessor::updateSlots()
+{
+    // the pattern length knob belongs to the edited slot
+    const int st = juce::jlimit (1, kMaxSteps, (int) pv (PID::steps));
+    if (pattern.length != st) { auto p = pattern; p.length = st; setPattern (p, false); }
+
+    const int sw = engine.swapCount.load();
+    if (sw != lastSwap)
+    {
+        lastSwap = sw;
+        if (queuedSlot >= 0)
+        {
+            playSlot = queuedSlot;
+            queuedSlot = -1;
+            chainReps = 0;
+            lastLoop = -1;
+            if (chainOn && playSlot != editSlot) selectSlot (playSlot);   // in a chain, the view follows the music
+            sendChangeMessage();
+        }
+    }
+    if (! chainOn || chain.empty() || ! running.load()) return;
+    const auto loop = (juce::int64) engine.loopIndex.load();
+    if (loop != lastLoop)
+    {
+        if (lastLoop >= 0) ++chainReps;
+        lastLoop = loop;
+    }
+    // during the last repeat of this chain entry, queue the next one (it starts when this one ends)
+    const auto& cur = chain[(size_t) juce::jlimit (0, (int) chain.size() - 1, chainPos)];
+    if (queuedSlot < 0 && chainReps >= cur.repeats - 1)
+    {
+        chainPos = (chainPos + 1) % (int) chain.size();
+        queueSlot (chain[(size_t) chainPos].slot);
+        sendChangeMessage();
+    }
 }
 
 void JSliceProcessor::modifyStep (int index, const std::function<void (Step&)>& fn, bool undoable)
@@ -624,6 +808,29 @@ void JSliceProcessor::getStateInformation (juce::MemoryBlock& destData)
 
     const juce::ScopedLock sl (stateLock);
     st.setProperty ("pattern", pattern.toString(), nullptr);
+    // pattern slots (the edited one takes its settings from the parameters, saved above)
+    st.setProperty ("editSlot", editSlot, nullptr);
+    st.setProperty ("chainOn", chainOn, nullptr);
+    {
+        juce::String ch;
+        for (auto& it : chain) ch << it.slot << ":" << it.repeats << ",";
+        st.setProperty ("chain", ch, nullptr);
+    }
+    juce::ValueTree slotsTree ("SLOTS");
+    for (int i = 0; i < kSlots; ++i)
+    {
+        if (i == editSlot) continue;
+        const auto& sl = slots[(size_t) i];
+        bool used = false;
+        for (auto& x : sl.pattern.steps) used |= x.on;
+        if (! used && sl.settings.isEmpty()) continue;
+        juce::ValueTree c ("SLOT");
+        c.setProperty ("index", i, nullptr);
+        c.setProperty ("pattern", sl.pattern.toString(), nullptr);
+        for (auto& nv : sl.settings) c.setProperty ("s_" + nv.name.toString(), nv.value, nullptr);
+        slotsTree.appendChild (c, nullptr);
+    }
+    st.appendChild (slotsTree, nullptr);
     st.setProperty ("slMode", slicerSettings.mode, nullptr);
     st.setProperty ("slSens", slicerSettings.sensitivity, nullptr);
     st.setProperty ("slGrid", slicerSettings.gridDivision, nullptr);
@@ -756,6 +963,38 @@ void JSliceProcessor::setStateInformation (const void* data, int sizeInBytes)
             for (auto& s : p.steps) s.slice = (int16_t) juce::jlimit (0, juce::jmax (0, n - 1), (int) s.slice);
             for (auto& s : p.fill)  s.slice = (int16_t) juce::jlimit (0, juce::jmax (0, n - 1), (int) s.slice);
         }
+        // pattern slots
+        for (auto& sl : slots) { sl = Slot(); }
+        editSlot = juce::jlimit (0, kSlots - 1, (int) st.getProperty ("editSlot", 0));
+        playSlot = editSlot; queuedSlot = -1;
+        engine.cancelQueue();
+        for (auto c : st.getChildWithName ("SLOTS"))
+        {
+            const int i = c.getProperty ("index", -1);
+            if (i < 0 || i >= kSlots || i == editSlot) continue;
+            auto& sl = slots[(size_t) i];
+            sl.pattern = Pattern::fromString (c.getProperty ("pattern").toString());
+            if (kit != nullptr)
+            {
+                const int n = (int) kit->slices.size();
+                for (auto& x : sl.pattern.steps) x.slice = (int16_t) juce::jlimit (0, juce::jmax (0, n - 1), (int) x.slice);
+                for (auto& x : sl.pattern.fill)  x.slice = (int16_t) juce::jlimit (0, juce::jmax (0, n - 1), (int) x.slice);
+            }
+            sl.madeFor = kit;
+            for (int k = 0; k < c.getNumProperties(); ++k)
+            {
+                const auto name = c.getPropertyName (k).toString();
+                if (name.startsWith ("s_")) sl.settings.set (name.substring (2), c.getProperty (name));
+            }
+        }
+        chain.clear();
+        for (auto& tok : juce::StringArray::fromTokens (st.getProperty ("chain").toString(), ",", ""))
+            if (tok.containsChar (':'))
+                chain.push_back ({ juce::jlimit (0, kSlots - 1, tok.upToFirstOccurrenceOf (":", false, false).getIntValue()),
+                                   juce::jlimit (1, 16, tok.fromFirstOccurrenceOf (":", false, false).getIntValue()) });
+        chainOn = (bool) st.getProperty ("chainOn", false) && ! chain.empty();
+        chainPos = 0; chainReps = 0; lastLoop = -1;
+
         setPattern (p, false);
         sendChangeMessage();
     };

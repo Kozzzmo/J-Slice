@@ -274,6 +274,38 @@ int main (int argc, char** argv)
         }
     }
 
+    // pattern change at the end of the pattern (queued slot)
+    {
+        Engine eng;
+        eng.prepare (48000.0, 512);
+        eng.setKit (kit);
+        Pattern a, b;
+        a.length = 16; b.length = 32;
+        a.steps[0].on = true; a.steps[0].slice = 0;
+        b.steps[0].on = true; b.steps[0].slice = 1; b.steps[16].on = true; b.steps[16].slice = 1;
+        eng.setPattern (a, false);
+        juce::AudioBuffer<float> buf (2, 512);
+        juce::MidiBuffer midi;
+        EngineParams prm; prm.patternSteps = 64;
+        Transport t; t.playing = true; t.bpm = 120.0;
+        const double ppqPerBlock = 512.0 / 48000.0 * 2.0;   // 120 BPM = 2 beats / s
+        int swapAt = -1, stepAfter = -1;
+        for (int blk = 0; blk < 400; ++blk)
+        {
+            if (blk == 40) eng.queuePattern (b);             // queued in the middle of the 2nd loop of A
+            const int before = eng.swapCount.load();
+            eng.process (buf, midi, t, prm);
+            if (eng.swapCount.load() != before && swapAt < 0) { swapAt = blk; stepAfter = eng.uiStep.load(); }
+            t.ppq += ppqPerBlock;
+        }
+        // A = 16 steps = 4 beats = 2 s ; blk 40 = 0.85 s into the 1st loop... the switch must land on a loop end (multiple of 4 beats)
+        const double swapPpq = (swapAt + 1) * ppqPerBlock;
+        const double loopEnd = std::ceil (40 * ppqPerBlock / 4.0) * 4.0;
+        check (swapAt >= 0 && std::abs (swapPpq - loopEnd) < ppqPerBlock + 1e-6 && stepAfter >= 0 && stepAfter < 2,
+               "queued pattern starts at the end of the playing one (from its step 1)");
+        check (eng.loopIndex.load() >= 0, "loop counter runs");
+    }
+
     // pattern serialisation round trip
     {
         auto p = Generator::generate (*kit, getStyles()[0].defaults, 42, nullptr);

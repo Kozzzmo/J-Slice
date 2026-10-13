@@ -86,6 +86,7 @@ struct Pattern
     std::array<Step, kMaxSteps>    steps {};
     std::array<Step, kStepsPerBar> fill {};
     uint32_t seed = 0;
+    int length = 0;                // loop length in steps (0 = the "Length" parameter decides)
 
     Step&       at (int bar, int s)       { return steps[(size_t) (bar * kStepsPerBar + s)]; }
     const Step& at (int bar, int s) const { return steps[(size_t) (bar * kStepsPerBar + s)]; }
@@ -105,6 +106,7 @@ struct Pattern
         for (auto& s : steps) writeStep (s);
         out << "|";
         for (auto& s : fill) writeStep (s);
+        out << "|" << length;
         return out;
     }
 
@@ -138,6 +140,7 @@ struct Pattern
         };
         readSteps (parts[1], p.steps.data(), kMaxSteps);
         readSteps (parts[2], p.fill.data(), kStepsPerBar);
+        p.length = parts.size() > 3 ? juce::jlimit (0, kMaxSteps, parts[3].getIntValue()) : 0;
         return p;
     }
 };
