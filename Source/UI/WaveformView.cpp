@@ -3,7 +3,7 @@
 
 using namespace ui;
 
-WaveformView::WaveformView (JSliceProcessor& p) : proc (p)
+WaveformView::WaveformView (JSliceProcessor& p, int s) : proc (p), slot (s)
 {
     setRepaintsOnMouseActivity (false);
     setTooltip ("Click: listen to a slice  |  drag a marker: move it\n"
@@ -14,7 +14,7 @@ WaveformView::WaveformView (JSliceProcessor& p) : proc (p)
 
 void WaveformView::refresh()
 {
-    kit = proc.getKit();
+    kit = proc.getKit (slot);
     if (kit == nullptr || selected >= (int) kit->slices.size()) selected = -1;
     rebuildPeaks();
     repaint();
@@ -22,8 +22,8 @@ void WaveformView::refresh()
 
 void WaveformView::tick()
 {
-    const int s = proc.engine.uiSlice.load();
-    const double pos = proc.engine.uiSamplePos.load();
+    const int s = proc.engine.uiSlice[slot].load();
+    const double pos = proc.engine.uiSamplePos[slot].load();
     if (s != playingSlice || std::abs (pos - playPos) > 1.0)
     {
         playingSlice = s;
@@ -34,7 +34,7 @@ void WaveformView::tick()
 
 juce::Rectangle<int> WaveformView::waveArea() const
 {
-    return getLocalBounds().reduced (10, 6).withTrimmedTop (22).withTrimmedBottom (16);
+    return getLocalBounds().reduced (6, 4).withTrimmedTop (18);
 }
 
 float WaveformView::sampleToX (double s) const
@@ -102,7 +102,7 @@ juce::Rectangle<float> WaveformView::tagRect (int i, bool& full) const
     const float nextX = i + 1 < (int) kit->slices.size() ? sampleToX ((double) kit->slices[(size_t) i + 1].start) : (float) a.getRight();
     const float fullW = 10.0f + 7.8f * (float) (juce::String (i + 1).length() + 1);
     full = nextX - x >= fullW + 1.0f || i == hoverMarker || i == selected;
-    return { x, (float) a.getY() - 20.0f, full ? fullW : juce::jmax (4.0f, juce::jmin (8.0f, nextX - x - 1.0f)), 16.0f };
+    return { x, (float) a.getY() - 17.0f, full ? fullW : juce::jmax (4.0f, juce::jmin (8.0f, nextX - x - 1.0f)), 14.0f };
 }
 
 int WaveformView::tagAt (juce::Point<float> p) const
@@ -133,12 +133,14 @@ void WaveformView::paint (juce::Graphics& g)
 
     if (kit == nullptr || kit->audio == nullptr)
     {
-        g.setColour (pl.text);
-        g.setFont (serifItalic (34.0f));
-        g.drawText ("Drop a break here", a.withTrimmedBottom (a.getHeight() / 2), Justification::centredBottom);
-        g.setFont (mono (12.0f));
+        g.setColour (breakColour (slot).withAlpha (0.9f));
+        g.setFont (serifItalic (28.0f));
+        auto t = getLocalBounds().reduced (12, 6);
+        g.drawText (slot == 0 ? "Drop a break here" : "Drop a second break here", t.removeFromTop (t.getHeight() / 2 + 6), Justification::centredBottom);
+        g.setFont (mono (11.0f));
         g.setColour (pl.dim);
-        g.drawText ("OR CLICK BROWSE  -  WAV / AIFF / FLAC / MP3 / OGG", a.withTrimmedTop (a.getHeight() / 2 + 8), Justification::centredTop);
+        g.drawText (slot == 0 ? "OR CLICK TO OPEN  -  WAV / AIFF / FLAC / MP3 / OGG"
+                              : "BREAK B FILLS THE GAPS OF BREAK A  -  CLICK TO OPEN", t.withTrimmedTop (4), Justification::centredTop);
         return;
     }
 
@@ -151,8 +153,8 @@ void WaveformView::paint (juce::Graphics& g)
         const auto& sl = kit->slices[(size_t) i];
         const float x0 = sampleToX ((double) sl.start), x1 = sampleToX ((double) sl.end);
         Rectangle<float> band (x0, (float) a.getY(), x1 - x0, (float) a.getHeight());
-        if (i == playingSlice)      g.setColour (pl.accent.withAlpha (0.20f));
-        else if (i == selected)     g.setColour (pl.accent.withAlpha (0.10f));
+        if (i == playingSlice)      g.setColour (breakColour (slot).withAlpha (0.22f));
+        else if (i == selected)     g.setColour (breakColour (slot).withAlpha (0.10f));
         else if (i % 2 == 1)        g.setColour (pl.raised.withAlpha (0.55f));
         else continue;
         g.fillRect (band);
@@ -168,12 +170,6 @@ void WaveformView::paint (juce::Graphics& g)
         g.setColour (bar ? pl.line : pl.faint.withAlpha (beat ? 0.9f : 0.35f));
         if (bar || beat) g.drawVerticalLine ((int) x, (float) a.getY(), (float) a.getBottom());
         else for (float y = (float) a.getY(); y < (float) a.getBottom(); y += 4.0f) g.fillRect (x, y, 1.0f, 1.0f);
-        if (bar && x < (float) a.getRight() - 380.0f)
-        {
-            g.setFont (mono (10.5f));
-            g.setColour (pl.dim);
-            g.drawText (String (st / 16 + 1), (int) x + 3, a.getBottom() + 1, 24, 14, Justification::left);
-        }
     }
 
     // waveform (filled, symmetric)
@@ -185,7 +181,7 @@ void WaveformView::paint (juce::Graphics& g)
         for (int x = 0; x < (int) peaks.size(); ++x) wave.lineTo ((float) (a.getX() + x), mid - peaks[(size_t) x].second * half);
         for (int x = (int) peaks.size() - 1; x >= 0; --x) wave.lineTo ((float) (a.getX() + x), mid - peaks[(size_t) x].first * half);
         wave.closeSubPath();
-        g.setColour (pl.accent.withAlpha (0.85f));
+        g.setColour (breakColour (slot).withAlpha (dimmed ? 0.3f : 0.85f));
         g.fillPath (wave);
     }
     g.setColour (pl.faint);
@@ -220,13 +216,6 @@ void WaveformView::paint (juce::Graphics& g)
         g.fillRect (Rectangle<float> (sampleToX (playPos) - 1.0f, (float) a.getY(), 2.0f, (float) a.getHeight()));
     }
 
-    // info line
-    g.setColour (pl.dim);
-    g.setFont (mono (10.5f));
-    String info;
-    info << (int) kit->slices.size() << " SLICES   " << String (kit->bpm, 2) << " BPM   " << kit->bars << (kit->bars > 1 ? " BARS   " : " BAR   ")
-         << String (kit->audio->sampleRate / 1000.0, 1) << " KHZ   " << String ((double) len / kit->audio->sampleRate, 2) << " S";
-    g.drawText (info, a.getX(), a.getBottom() + 1, a.getWidth(), 14, Justification::right);
 }
 
 void WaveformView::mouseMove (const juce::MouseEvent& e)
@@ -242,7 +231,8 @@ void WaveformView::mouseMove (const juce::MouseEvent& e)
 
 void WaveformView::mouseDown (const juce::MouseEvent& e)
 {
-    if (kit == nullptr) return;
+    if (onActivate) onActivate();
+    if (kit == nullptr) { if (onEmptyClick) onEmptyClick(); return; }
     if (e.mods.isPopupMenu())
     {
         const int m = markerAt ((float) e.x);
@@ -259,7 +249,7 @@ void WaveformView::mouseDown (const juce::MouseEvent& e)
         return;
     }
     selected = sliceAt ((float) e.x);
-    if (selected >= 0) proc.previewSlice (selected);
+    if (selected >= 0) proc.previewSlice (slot, selected);
     repaint();
 }
 
@@ -271,15 +261,15 @@ void WaveformView::mouseDrag (const juce::MouseEvent& e)
     int64_t lo = i > 0 ? dragSlices[i - 1].start + 64 : 0;
     int64_t hi = i + 1 < dragSlices.size() ? dragSlices[i + 1].start - 64 : kit->length() - 64;
     dragSlices[i].start = juce::jlimit (lo, juce::jmax (lo, hi), (int64_t) xToSample ((float) e.x));
-    proc.updateSlices (dragSlices, false);
+    proc.updateSlices (slot, dragSlices, false);
 }
 
 void WaveformView::mouseUp (const juce::MouseEvent&)
 {
     if (dragMarker >= 0)
     {
-        if (markerMoved) proc.updateSlices (dragSlices, true);
-        proc.previewSlice (dragMarker);
+        if (markerMoved) proc.updateSlices (slot, dragSlices, true);
+        proc.previewSlice (slot, dragMarker);
         selected = dragMarker;
         dragMarker = -1;
         markerMoved = false;
@@ -300,7 +290,7 @@ void WaveformView::mouseDoubleClick (const juce::MouseEvent& e)
         slices.erase (slices.begin() + tag);
         selected = -1;
         hoverMarker = -1;
-        proc.updateSlices (slices, true);
+        proc.updateSlices (slot, slices, true);
         return;
     }
 
@@ -311,7 +301,7 @@ void WaveformView::mouseDoubleClick (const juce::MouseEvent& e)
     s.start = (int64_t) xToSample ((float) e.x);
     s.strength = 0.5f;
     slices.push_back (s);
-    proc.updateSlices (slices, true);
+    proc.updateSlices (slot, slices, true);
 }
 
 void WaveformView::showSliceMenu (int slice)
@@ -336,22 +326,22 @@ void WaveformView::showSliceMenu (int slice)
         auto& self = *safe;
         if (self.kit == nullptr || slice >= (int) self.kit->slices.size()) return;
         auto slices = self.kit->slices;
-        if (r == 1) { self.proc.previewSlice (slice); return; }
+        if (r == 1) { self.proc.previewSlice (self.slot, slice); return; }
         if (r >= 10 && r < 10 + bc::kNumClasses)
         {
             slices[(size_t) slice].cls = (bc::HitClass) (r - 10);
             slices[(size_t) slice].userClass = true;
-            self.proc.updateSlices (slices, false);
+            self.proc.updateSlices (self.slot, slices, false);
         }
         else if (r == 20)
         {
             slices[(size_t) slice].userClass = false;
-            self.proc.updateSlices (slices, true);
+            self.proc.updateSlices (self.slot, slices, true);
         }
         else if (r == 30)
         {
             slices.erase (slices.begin() + slice);
-            self.proc.updateSlices (slices, true);
+            self.proc.updateSlices (self.slot, slices, true);
         }
     });
 }

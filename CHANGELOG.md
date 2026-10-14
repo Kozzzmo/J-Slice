@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0
+
+- **New name: Kinetik Jungle (KJNG-2)**: same plug-in, your projects keep working (remove the old J-Slice first)
+- **Second break (B)**: a second generator places B hits in the gaps of A, never two hits on one step (DUO: fill the gaps, call / response, split roles; B share)
+- **New sequencer**: two lanes A / B with the shape of each slice, zoom 1 / 2 / 4 bars, velocity lane, 8-bar map
+- **Inspector**: everything about the selected hit in clear (slice, length, retrig, velocity, pitch, reverse, effects, lock)
+- **Live macros**: COMPLEXITY / ENERGY / CHAOS are heard while you move them, same pattern base; zone faders with named zones
+- **Palet knobs**: the value is written in the centre
+- MIDI: C4 and above play the slices of break B
+
 ## 1.3.1
 
 - NEON skin: the pink highlights are red

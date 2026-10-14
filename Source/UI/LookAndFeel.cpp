@@ -26,9 +26,11 @@ namespace
         neon.active   = C (0xffaeb6ff);
         neon.hot      = C (0xffff4655);
         neon.kick     = C (0xffaeb6ff);
-        neon.snare    = C (0xffff8cc8);
+        neon.snare    = C (0xffff6b6b);
         neon.hat      = C (0xff7fe2d2);
         neon.ghost    = C (0xff8e7ff2);
+        neon.breakA   = C (0xffaeb6ff);
+        neon.breakB   = C (0xffffc46b);
         s.push_back (neon);
 
         Palette mid;
@@ -49,6 +51,8 @@ namespace
         mid.snare    = C (0xfff2a44f);
         mid.hat      = C (0xff6fc7b8);
         mid.ghost    = C (0xffb9a8e6);
+        mid.breakA   = C (0xffefe6d2);
+        mid.breakB   = C (0xfff2a44f);
         s.push_back (mid);
 
         Palette amen;   // the original J-Slice look, kept as an option
@@ -69,6 +73,8 @@ namespace
         amen.snare    = C (0xffffc933);
         amen.hat      = C (0xff4fd3c4);
         amen.ghost    = C (0xffa58bff);
+        amen.breakA   = C (0xffb5c77a);
+        amen.breakB   = C (0xffff9a3c);
         s.push_back (amen);
         return s;
     }
@@ -200,44 +206,44 @@ void LookAndFeel::applySkin()
 
 void LookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float start, float end, juce::Slider& s)
 {
+    // "Palet" : solid disc, thin value arc around it, notch on the rim ; the value is printed inside by ui::Knob
     using namespace juce;
     const auto& p = pal();
     auto bounds = Rectangle<float> ((float) x, (float) y, (float) w, (float) h).reduced (2.0f);
     const float size = jmin (bounds.getWidth(), bounds.getHeight());
     const auto c = bounds.getCentre();
-    const float outer = size * 0.5f;
+    const float R = size * 0.5f;
     const float angle = start + pos * (end - start);
     const bool hot = s.isMouseOverOrDragging() || s.isMouseButtonDown();
-    const auto valueCol = s.isEnabled() ? (hot ? p.active : p.text) : p.dim;
+    const auto arcCol = s.isEnabled() ? (hot ? p.hot : p.accent) : p.dim;
+    const float arcW = jmax (2.5f, R * 0.085f), arcR = R - arcW * 0.5f - 1.0f;
 
-    // ring of dots : lit up to the value
-    const int dots = juce::jlimit (14, 28, (int) (size * 0.36f));
-    const float dotR = jmax (1.1f, size * 0.022f);
+    Path bg, arc;
+    bg.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, start, end, true);
+    g.setColour (p.faint);
+    g.strokePath (bg, PathStrokeType (arcW, PathStrokeType::curved, PathStrokeType::rounded));
     const bool bipolar = s.getMinimum() < 0.0 && s.getMaximum() > 0.0;
-    const float mid = (start + end) * 0.5f;
-    for (int i = 0; i < dots; ++i)
+    const float from = bipolar ? (start + end) * 0.5f : start;
+    if (std::abs (angle - from) > 0.001f)
     {
-        const float a = start + (float) i / (float) (dots - 1) * (end - start);
-        const bool lit = bipolar ? (a >= jmin (mid, angle) - 0.001f && a <= jmax (mid, angle) + 0.001f)
-                                 : a <= angle + 0.001f;
-        const auto pt = c.getPointOnCircumference (outer - dotR - 0.5f, a);
-        g.setColour (lit ? valueCol : p.faint);
-        g.fillEllipse (Rectangle<float> (dotR * 2.0f, dotR * 2.0f).withCentre (pt));
+        arc.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, jmin (from, angle), jmax (from, angle), true);
+        g.setColour (arcCol);
+        g.strokePath (arc, PathStrokeType (arcW, PathStrokeType::curved, PathStrokeType::rounded));
     }
 
-    // body
-    const float bodyR = outer - dotR * 2.0f - jmax (3.0f, size * 0.07f);
-    auto body = Rectangle<float> (bodyR * 2.0f, bodyR * 2.0f).withCentre (c);
-    g.setColour (p.inset);
-    g.fillEllipse (body);
-    g.setColour (hot ? p.active : p.line);
-    g.drawEllipse (body, hot ? 1.6f : 1.2f);
+    const float discR = R * 0.74f;
+    auto disc = Rectangle<float> (discR * 2.0f, discR * 2.0f).withCentre (c);
+    ColourGradient grad (p.raised.brighter (0.35f), c.x - discR * 0.35f, c.y - discR * 0.45f, p.inset, c.x + discR * 0.3f, c.y + discR * 0.6f, true);
+    g.setGradientFill (grad);
+    g.fillEllipse (disc);
+    g.setColour (hot ? p.hot.withAlpha (0.8f) : p.line);
+    g.drawEllipse (disc, 1.0f);
 
-    // pointer
-    g.setColour (hot ? p.active : p.text);
-    const auto p1 = c.getPointOnCircumference (bodyR * 0.18f, angle);
-    const auto p2 = c.getPointOnCircumference (bodyR * 0.82f, angle);
-    g.drawLine ({ p1, p2 }, jmax (1.8f, size * 0.035f));
+    // notch on the rim of the disc
+    const auto n = c.getPointOnCircumference (discR * 0.80f, angle);
+    const float nr = jmax (2.0f, R * 0.07f);
+    g.setColour (hot ? p.hot : p.text);
+    g.fillEllipse (Rectangle<float> (nr * 2.0f, nr * 2.0f).withCentre (n));
 }
 
 void LookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down)

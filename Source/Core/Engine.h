@@ -24,6 +24,7 @@ struct EngineParams
     float attackMs    = 0.5f;
     float velSens     = 0.7f;
     bool  seqOn       = true;
+    bool  bOn         = true;   // break B enabled (its steps are skipped when off)
 
     // colour
     bool  crushOn  = false; float bits = 12.0f; float rate = 26000.0f;
@@ -60,14 +61,14 @@ public:
     void prepare (double sampleRate, int maxBlockSize);
 
     // ---- message thread
-    void setKit (Kit::Ptr newKit);
+    void setKit (int slot, Kit::Ptr newKit);
     void setPattern (const Pattern& p, bool quantiseToBar);
     void queuePattern (const Pattern& p);   // plays when the current pattern reaches its end (pattern change)
     void cancelQueue()                 { const juce::SpinLock::ScopedLockType sl (patternLock); queuePending = false; }
 
     // ---- any thread
     void requestFill()                 { fillRequested.store (true); }
-    void previewSlice (int index)      { previewRequest.store (index); }
+    void previewSlice (int slot, int index) { previewRequest.store (slot * 1000 + index); }
     void stopAll()                     { stopRequested.store (true); }
 
     // ---- audio thread
@@ -75,8 +76,8 @@ public:
 
     // ---- feedback for the UI / processor
     std::atomic<int>    uiStep { -1 };          // 0..127 normal steps, 128..143 fill bar
-    std::atomic<int>    uiSlice { -1 };
-    std::atomic<double> uiSamplePos { -1.0 };   // position inside the source of the last voice
+    std::atomic<int>    uiSlice[kNumBreaks] { -1, -1 };
+    std::atomic<double> uiSamplePos[kNumBreaks] { -1.0, -1.0 };   // play position inside each break (newest voice)
     std::atomic<int>    midiGenerate { 0 }, midiMutate { 0 }, midiUndo { 0 }, midiSeqToggle { 0 };
     std::atomic<int>    swapCount { 0 };        // incremented each time a queued / new pattern takes over
     std::atomic<int64_t> loopIndex { 0 };       // how many times the playing pattern has looped
@@ -92,12 +93,14 @@ private:
         int64_t gateSamples = std::numeric_limits<int64_t>::max();
         int   uiStep = -1;
         uint8_t fx = 0;
+        int   src = 0;
     };
 
     struct Voice
     {
         bool    active = false;
         int     slice = -1;
+        int     src = 0;
         bool    send = false;                     // snare / ghost : feeds the "snares" sends
         uint8_t fx = 0;                           // per-step effects (StepFx)
         float   lfPhase = 0.0f, lfL = 0.0f, lfR = 0.0f;                    // per-hit lo-fi
@@ -134,8 +137,8 @@ private:
     double sr = 44100.0;
     int maxBlock = 512;
 
-    Kit::Ptr kit, pendingKit;
-    bool kitPending = false;
+    Kit::Ptr kits[kNumBreaks], pendingKits[kNumBreaks];
+    bool kitPending[kNumBreaks] { false, false };
     juce::SpinLock kitLock;
 
     Pattern pattern, pendingPattern, queuedPattern;

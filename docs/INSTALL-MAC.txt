@@ -1,29 +1,31 @@
-J-SLICE - installation sur Mac (Apple Silicon M1/M2/M3/M4 et Intel, macOS 11 ou plus)
-=====================================================================================
+KINETIK JUNGLE (KJNG-2) - installation sur Mac (Apple Silicon M1/M2/M3/M4 et Intel, macOS 11 ou plus)
+=====================================================================================================
 
 Méthode simple (recommandée)
 ----------------------------
-1. Dézipper J-Slice-macOS.zip (double-clic) : un dossier "J-Slice" apparaît.
+1. Dézipper Kinetik-Jungle-macOS.zip (double-clic) : un dossier "Kinetik Jungle" apparaît.
 2. Ouvrir l'application Terminal (Applications > Utilitaires > Terminal).
-3. Taper  bash  suivi d'un espace, puis glisser le fichier install.sh du dossier J-Slice
+3. Taper  bash  suivi d'un espace, puis glisser le fichier install.sh du dossier Kinetik Jungle
    dans la fenêtre du Terminal, et appuyer sur Entrée.
    Le script copie le VST3 et l'Audio Unit au bon endroit et lève le blocage de macOS
    (le plugin n'est pas signé par Apple, il est gratuit et compilé automatiquement).
 4. Ableton Live 12 : Settings > Plug-Ins
    - activer "Use Audio Units" et/ou "Use VST3 Plug-In System Folders"
    - cliquer sur "Rescan"
-5. Dans le navigateur d'Ableton : Plug-Ins > Kozzzmo > J-Slice, à glisser sur une piste MIDI.
+5. Dans le navigateur d'Ableton : Plug-Ins > Kozzzmo > Kinetik Jungle, à glisser sur une piste MIDI.
 
 Méthode manuelle
 ----------------
-- Copier J-Slice.vst3 dans      ~/Library/Audio/Plug-Ins/VST3/
-- Copier J-Slice.component dans ~/Library/Audio/Plug-Ins/Components/
+- Copier "Kinetik Jungle.vst3" dans      ~/Library/Audio/Plug-Ins/VST3/
+- Copier "Kinetik Jungle.component" dans ~/Library/Audio/Plug-Ins/Components/
   (dans le Finder : menu Aller > Aller au dossier..., puis coller le chemin)
 - Puis dans le Terminal :
-    xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/J-Slice.vst3 ~/Library/Audio/Plug-Ins/Components/J-Slice.component
+    xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Kinetik\ Jungle.vst3 ~/Library/Audio/Plug-Ins/Components/Kinetik\ Jungle.component
 
-J-Slice.app est une version autonome (sans Ableton) pour tester rapidement.
+"Kinetik Jungle.app" est une version autonome (sans Ableton) pour tester rapidement.
 Si macOS dit qu'elle ne peut pas être ouverte : Réglages Système > Confidentialité et sécurité >
 "Ouvrir quand même" (ou lancer d'abord install.sh, qui lève aussi le blocage de l'app).
 
+L'ancienne version s'appelait J-Slice : c'est le même plugin sous son ancien nom. install.sh la retire
+(en méthode manuelle, supprime J-Slice.vst3 et J-Slice.component). Tes projets Ableton continuent de marcher.
 Le dossier demo-loops contient des boucles générées par les tests automatiques.

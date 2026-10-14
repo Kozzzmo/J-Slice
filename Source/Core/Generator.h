@@ -6,6 +6,9 @@ namespace bc
 {
 
 /** Effective generator settings (detail parameters after the macro knobs were applied). */
+enum DuoMode { DuoFillGaps = 0, DuoCallResponse, DuoSplitRoles };
+inline juce::StringArray duoModeNames() { return { "Fill the gaps", "Call / response", "Split roles" }; }
+
 struct GenSettings
 {
     int   style      = 0;
@@ -55,8 +58,23 @@ public:
     /** Small musical changes on unlocked steps. */
     static void mutate (Pattern& p, const Kit& kit, const GenSettings& s, uint32_t seed);
 
-    /** Re-targets a pattern to another break, slice by slice, keeping the role (kick/snare/...) of each hit. */
-    static Pattern remap (const Pattern& p, const Kit& oldKit, const Kit& newKit);
+    /** Re-targets a pattern to another break, slice by slice, keeping the role (kick/snare/...) of each hit.
+        src >= 0 : only the steps played by that break are touched. */
+    static Pattern remap (const Pattern& p, const Kit& oldKit, const Kit& newKit, int src = -1);
+
+    /** Duo : merges the pattern of break A and the pattern of break B into one pattern where every
+        step belongs to A or B (never both).
+          0 = Fill the gaps   : B plays where A is silent (and may take over some of A's hats / ghosts)
+          1 = Call / response : A plays the first half of each bar, B answers in the second half
+          2 = Split roles     : A keeps kicks and snares, B plays the hats and ghosts
+        share (0..1) = how much room B gets. */
+    static Pattern combine (const Pattern& a, const Pattern& b, int mode, float share, uint32_t seed);
+
+    /** Settings used for break B : same style, a bit busier in hats / ghosts so it has material to fill A's gaps. */
+    static GenSettings settingsForB (const GenSettings& s, int mode, float share);
+
+    /** Mutation of a two-break pattern, each step mutated with its own break. */
+    static void mutateDuo (Pattern& p, const Kit* kits[kNumBreaks], const GenSettings& s, uint32_t seed);
 
     /** The slice that naturally sits at a given step of the break (used when the user adds a step by hand). */
     static int naturalSliceForStep (const Kit& kit, int absoluteStep);

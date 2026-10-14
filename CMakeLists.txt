@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(J_SLICE VERSION 1.3.1 LANGUAGES C CXX)
+project(J_SLICE VERSION 2.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -49,12 +49,12 @@ endif()
 
 if(JSLICE_BUILD_PLUGIN)
 juce_add_plugin(JSlice
-    PRODUCT_NAME "J-Slice"
+    PRODUCT_NAME "Kinetik Jungle"
     COMPANY_NAME "Kozzzmo"
     BUNDLE_ID "com.kozzzmo.jslice"
     PLUGIN_MANUFACTURER_CODE Kozz
-    PLUGIN_CODE JSlc
-    DESCRIPTION "Jungle / drum and bass break slicer and generator"
+    PLUGIN_CODE JSlc   # kept from J-Slice : saved Ableton sets keep working
+    DESCRIPTION "Kinetik KJNG-2 : dual break jungle / drum and bass slicer and generator"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
@@ -73,6 +73,7 @@ target_sources(JSlice PRIVATE
     Source/UI/Widgets.cpp
     Source/UI/WaveformView.cpp
     Source/UI/StepGrid.cpp
+    Source/UI/Inspector.cpp
     Source/UI/BrowserPanel.cpp
     Source/UI/PatternBar.cpp
     Source/UI/UpdateCheck.cpp
