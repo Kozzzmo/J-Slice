@@ -52,9 +52,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout JSliceProcessor::createLayou
     l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::quantize, 1 }, "Change on next bar", true));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::seqOn, 1 }, "Sequencer on", true));
     l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::syncOn, 1 }, "Sync to host", true));
-    l.add (std::make_unique<AudioParameterBool> (ParameterID { PID::bOn, 1 }, "Break B on", true));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { PID::duoMode, 1 }, "Duo mode", duoModeNames(), 0));
-    l.add (pct (PID::bShare, "B share", 0.5f));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { PID::freeBpm, 1 }, "Free tempo", NormalisableRange<float> (60.0f, 220.0f, 0.1f), 172.0f,
                                                   AudioParameterFloatAttributes().withLabel ("BPM")));
 
@@ -110,16 +107,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout JSliceProcessor::createLayou
     return l;
 }
 
-
-namespace
-{
-    // every parameter that changes the generated pattern : moving one re-generates live (same seed)
-    const char* const kGenParams[] = { PID::complexity, PID::energy, PID::chaos, PID::density, PID::backbone, PID::ghosts,
-                                       PID::hats, PID::chop, PID::cut16, PID::rolls, PID::stutter, PID::reverse,
-                                       PID::pitchProb, PID::pitchRange, PID::gateProb, PID::variation, PID::fillAmt,
-                                       PID::maxRepeats, PID::humanize, PID::duoMode, PID::bShare, PID::bOn };
-}
-
 //==============================================================================
 JSliceProcessor::JSliceProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
@@ -128,15 +115,13 @@ JSliceProcessor::JSliceProcessor()
     formatManager.registerBasicFormats();
 
     juce::PropertiesFile::Options o;
-    o.applicationName = "J-Slice";      // settings file kept from J-Slice (favourites, update check)
+    o.applicationName = "J-Slice";
     o.folderName = "J-Slice";
     o.filenameSuffix = ".settings";
     o.osxLibrarySubFolder = "Application Support";
     globalSettings = std::make_unique<juce::PropertiesFile> (o);
 
     for (auto* id : { PID::genTrig, PID::mutTrig, PID::fillTrig })
-        apvts.addParameterListener (id, this);
-    for (auto* id : kGenParams)
         apvts.addParameterListener (id, this);
 
     pattern.seed = 1;
@@ -149,8 +134,6 @@ JSliceProcessor::~JSliceProcessor()
     stopTimer();
     for (auto* id : { PID::genTrig, PID::mutTrig, PID::fillTrig })
         apvts.removeParameterListener (id, this);
-    for (auto* id : kGenParams)
-        apvts.removeParameterListener (id, this);
 }
 
 bool JSliceProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -161,8 +144,7 @@ bool JSliceProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 void JSliceProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate, samplesPerBlock);
-    for (int k = 0; k < kNumBreaks; ++k)
-        if (breaks[(size_t) k].kit != nullptr) engine.setKit (k, breaks[(size_t) k].kit);
+    if (kit != nullptr) engine.setKit (kit);
     engine.setPattern (pattern, false);
 }
 
@@ -183,7 +165,6 @@ EngineParams JSliceProcessor::currentEngineParams() const
     p.decay = pv (PID::decay);
     p.velSens = pv (PID::velSens);
     p.seqOn = pv (PID::seqOn) > 0.5f;
-    p.bOn = pv (PID::bOn) > 0.5f;
     p.crushOn = pv (PID::crushOn) > 0.5f;
     p.bits = pv (PID::bits);
     p.rate = pv (PID::rate);
@@ -303,21 +284,13 @@ void JSliceProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     midi.clear();
 }
 
-
 //==============================================================================
 void JSliceProcessor::parameterChanged (const juce::String& id, float value)
 {
-    if (id == PID::genTrig || id == PID::mutTrig || id == PID::fillTrig)
-    {
-        if (value < 0.5f) return;
-        if (id == PID::genTrig)  genRequests.fetch_add (1);
-        if (id == PID::mutTrig)  mutRequests.fetch_add (1);
-        if (id == PID::fillTrig) { fillRequests.fetch_add (1); engine.requestFill(); }
-        return;
-    }
-    // generator parameter : schedule a live re-generation (handled on the message thread)
-    regenRequestTime.store (juce::Time::getMillisecondCounter());
-    regenPending.store (true);
+    if (value < 0.5f) return;
+    if (id == PID::genTrig)  genRequests.fetch_add (1);
+    if (id == PID::mutTrig)  mutRequests.fetch_add (1);
+    if (id == PID::fillTrig) { fillRequests.fetch_add (1); engine.requestFill(); }
 }
 
 void JSliceProcessor::timerCallback()
@@ -326,12 +299,6 @@ void JSliceProcessor::timerCallback()
     if (genRequests.exchange (0) > 0) generate();
     if (mutRequests.exchange (0) > 0) mutate();
     fillRequests.store (0);
-
-    if (regenPending.load() && juce::Time::getMillisecondCounter() - regenRequestTime.load() > 40)
-    {
-        regenPending.store (false);
-        if (! restoringState) regenerateLive();
-    }
 
     const int g = engine.midiGenerate.load(), m = engine.midiMutate.load(), u = engine.midiUndo.load(), s = engine.midiSeqToggle.load();
     if (g != lastMidiGen) { lastMidiGen = g; generate(); }
@@ -367,60 +334,52 @@ AudioData::Ptr JSliceProcessor::readAudio (const juce::File& f, juce::String& er
     return a;
 }
 
-void JSliceProcessor::setKit (int slot, Kit::Ptr k)
+bool JSliceProcessor::loadFile (const juce::File& f, juce::String& error)
 {
-    {
-        const juce::ScopedLock sl (stateLock);
-        breaks[(size_t) slot].kit = k;
-    }
-    engine.setKit (slot, k);
-}
-
-bool JSliceProcessor::loadFile (int slot, const juce::File& f, juce::String& error)
-{
-    slot = juce::jlimit (0, kNumBreaks - 1, slot);
     auto a = readAudio (f, error);
     if (a == nullptr) return false;
-    setAudio (slot, a, keepPatternOnLoad());
+    setAudio (a, keepPatternOnLoad());
     globalSettings->setValue ("lastDir", f.getParentDirectory().getFullPathName());
     globalSettings->saveIfNeeded();
     return true;
 }
 
-void JSliceProcessor::setAudio (int slot, AudioData::Ptr audio, bool keepPattern)
+void JSliceProcessor::setAudio (AudioData::Ptr audio, bool keepPattern)
 {
-    auto& sl = breaks[(size_t) slot];
-    sl.liveBaseKit = nullptr;
-    Kit::Ptr oldKit = sl.kit;
-    sl.analysis = Analyzer::analyze (audio->buffer, audio->sampleRate);
+    liveBaseKit = nullptr;
+    Kit::Ptr oldKit = kit;
+    analysis = Analyzer::analyze (audio->buffer, audio->sampleRate);
 
     Kit::Ptr k = new Kit();
     k->audio = audio;
-    k->bpm = sl.analysis.bpm;
-    k->bars = sl.analysis.bars;
-    k->gridOrigin = sl.analysis.gridOrigin;
-    k->slices = Analyzer::makeSlices (sl.analysis, audio->buffer, audio->sampleRate, k->bpm, k->bars, k->gridOrigin, sl.slicer);
+    k->bpm = analysis.bpm;
+    k->bars = analysis.bars;
+    k->gridOrigin = analysis.gridOrigin;
+    k->slices = Analyzer::makeSlices (analysis, audio->buffer, audio->sampleRate, k->bpm, k->bars, k->gridOrigin, slicerSettings);
     Analyzer::classify (k->slices, audio->buffer, audio->sampleRate, k->bpm, k->gridOrigin);
-    setKit (slot, k);
+    {
+        const juce::ScopedLock sl (stateLock);
+        kit = k;
+    }
+    pushKit();
 
-    bool hasHits = false;
-    for (auto& s : pattern.steps) hasHits |= s.on && s.src == slot;
-    if (keepPattern && hasHits && oldKit != nullptr && ! oldKit->slices.empty())
-        setPattern (Generator::remap (pattern, *oldKit, *k, slot), true);
+    bool hasPattern = false;
+    for (auto& s : pattern.steps) hasPattern |= s.on;
+    if (keepPattern && hasPattern && oldKit != nullptr && ! oldKit->slices.empty())
+        setPattern (Generator::remap (pattern, *oldKit, *kit), true);
     else
         generate();
     sendChangeMessage();
 }
 
-juce::File JSliceProcessor::getCurrentFile (int slot) const
+juce::File JSliceProcessor::getCurrentFile() const
 {
-    auto k = getKit (slot);
-    return (k != nullptr && k->audio != nullptr) ? k->audio->file : juce::File();
+    return (kit != nullptr && kit->audio != nullptr) ? kit->audio->file : juce::File();
 }
 
-juce::File JSliceProcessor::getSiblingFile (int slot, int delta) const
+juce::File JSliceProcessor::getSiblingFile (int delta) const
 {
-    const auto cur = getCurrentFile (slot);
+    const auto cur = getCurrentFile();
     if (! cur.existsAsFile()) return {};
     auto files = cur.getParentDirectory().findChildFiles (juce::File::findFiles, false, getSupportedWildcard());
     if (files.isEmpty()) return {};
@@ -431,74 +390,88 @@ juce::File JSliceProcessor::getSiblingFile (int slot, int delta) const
     return files[idx];
 }
 
-void JSliceProcessor::rebuildSlices (int slot)
+void JSliceProcessor::pushKit()
 {
-    auto& sl = breaks[(size_t) slot];
-    if (sl.kit == nullptr) return;
-    auto& a = *sl.kit->audio;
-    auto slices = Analyzer::makeSlices (sl.analysis, a.buffer, a.sampleRate, sl.kit->bpm, sl.kit->bars, sl.kit->gridOrigin, sl.slicer);
-    Analyzer::classify (slices, a.buffer, a.sampleRate, sl.kit->bpm, sl.kit->gridOrigin);
+    engine.setKit (kit);
+}
+
+void JSliceProcessor::rebuildSlices()
+{
+    if (kit == nullptr) return;
+    auto& a = *kit->audio;
+    auto slices = Analyzer::makeSlices (analysis, a.buffer, a.sampleRate, kit->bpm, kit->bars, kit->gridOrigin, slicerSettings);
+    Analyzer::classify (slices, a.buffer, a.sampleRate, kit->bpm, kit->gridOrigin);
     const auto now = juce::Time::getMillisecondCounter();
-    const bool newGesture = sl.liveBaseKit == nullptr || now - sl.liveBaseTime > 700;
+    const bool newGesture = liveBaseKit == nullptr || now - liveBaseTime > 700;
     if (newGesture)
     {
-        sl.liveBaseKit = sl.kit;
-        sl.liveBasePattern = pattern;
+        liveBaseKit = kit;
+        liveBasePattern = pattern;
     }
-    sl.liveBaseTime = now;
-    setKit (slot, sl.kit->cloneWithSlices (std::move (slices)));
-    setPattern (Generator::remap (sl.liveBasePattern, *sl.liveBaseKit, *sl.kit, slot), newGesture);
+    liveBaseTime = now;
+    {
+        const juce::ScopedLock sl (stateLock);
+        kit = kit->cloneWithSlices (std::move (slices));
+    }
+    pushKit();
+    setPattern (Generator::remap (liveBasePattern, *liveBaseKit, *kit), newGesture);
     sendChangeMessage();
 }
 
-void JSliceProcessor::setSlicerSettings (int slot, const SlicerSettings& s)
+void JSliceProcessor::setSlicerSettings (const SlicerSettings& s)
 {
-    slot = juce::jlimit (0, kNumBreaks - 1, slot);
-    breaks[(size_t) slot].slicer = s;
-    rebuildSlices (slot);
+    slicerSettings = s;
+    rebuildSlices();
 }
 
-void JSliceProcessor::setBreakTempo (int slot, double bpm, int bars, bool reslice)
+void JSliceProcessor::setBreakTempo (double bpm, int bars, bool reslice)
 {
-    auto& sl = breaks[(size_t) juce::jlimit (0, kNumBreaks - 1, slot)];
-    if (sl.kit == nullptr) return;
-    Kit::Ptr k = sl.kit->cloneWithSlices (sl.kit->slices);
+    if (kit == nullptr) return;
+    Kit::Ptr k = kit->cloneWithSlices (kit->slices);
     k->bpm = juce::jlimit (30.0, 400.0, bpm);
     k->bars = juce::jlimit (1, 64, bars);
     Analyzer::finaliseSlices (k->slices, k->length(), k->audio->sampleRate, k->bpm, k->gridOrigin);
-    setKit (slot, k);
-    if (reslice) rebuildSlices (slot);
-    else sendChangeMessage();
+    {
+        const juce::ScopedLock sl (stateLock);
+        kit = k;
+    }
+    if (reslice) rebuildSlices();
+    else { pushKit(); sendChangeMessage(); }
 }
 
-void JSliceProcessor::redetectTempo (int slot)
+void JSliceProcessor::redetectTempo()
 {
-    auto& sl = breaks[(size_t) juce::jlimit (0, kNumBreaks - 1, slot)];
-    if (sl.kit == nullptr) return;
-    Kit::Ptr k = sl.kit->cloneWithSlices (sl.kit->slices);
-    k->bpm = sl.analysis.bpm;
-    k->bars = sl.analysis.bars;
-    k->gridOrigin = sl.analysis.gridOrigin;
-    setKit (slot, k);
-    rebuildSlices (slot);
+    if (kit == nullptr) return;
+    Kit::Ptr k = kit->cloneWithSlices (kit->slices);
+    k->bpm = analysis.bpm;
+    k->bars = analysis.bars;
+    k->gridOrigin = analysis.gridOrigin;
+    {
+        const juce::ScopedLock sl (stateLock);
+        kit = k;
+    }
+    rebuildSlices();
 }
 
-void JSliceProcessor::updateSlices (int slot, std::vector<Slice> slices, bool reclassify)
+void JSliceProcessor::updateSlices (std::vector<Slice> slices, bool reclassify)
 {
-    slot = juce::jlimit (0, kNumBreaks - 1, slot);
-    auto& sl = breaks[(size_t) slot];
-    sl.liveBaseKit = nullptr;
-    if (sl.kit == nullptr) return;
-    auto& a = *sl.kit->audio;
-    Analyzer::finaliseSlices (slices, a.buffer.getNumSamples(), a.sampleRate, sl.kit->bpm, sl.kit->gridOrigin);
+    liveBaseKit = nullptr;
+    if (kit == nullptr) return;
+    auto& a = *kit->audio;
+    Analyzer::finaliseSlices (slices, a.buffer.getNumSamples(), a.sampleRate, kit->bpm, kit->gridOrigin);
     if (slices.empty()) return;
-    if (reclassify) Analyzer::classify (slices, a.buffer, a.sampleRate, sl.kit->bpm, sl.kit->gridOrigin);
+    if (reclassify) Analyzer::classify (slices, a.buffer, a.sampleRate, kit->bpm, kit->gridOrigin);
     const int n = (int) slices.size();
-    setKit (slot, sl.kit->cloneWithSlices (std::move (slices)));
+    {
+        const juce::ScopedLock sl (stateLock);
+        kit = kit->cloneWithSlices (std::move (slices));
+    }
+    pushKit();
+    // keep step indices valid
     bool changed = false;
     auto p = pattern;
-    for (auto& s : p.steps) if (s.src == slot && s.slice >= n) { s.slice = (int16_t) (n - 1); changed = true; }
-    for (auto& s : p.fill)  if (s.src == slot && s.slice >= n) { s.slice = (int16_t) (n - 1); changed = true; }
+    for (auto& s : p.steps) if (s.slice >= n) { s.slice = (int16_t) (n - 1); changed = true; }
+    for (auto& s : p.fill)  if (s.slice >= n) { s.slice = (int16_t) (n - 1); changed = true; }
     if (changed) setPattern (p, false);
     sendChangeMessage();
 }
@@ -516,9 +489,8 @@ void JSliceProcessor::setPattern (const Pattern& p, bool undoable)
         const juce::ScopedLock sl (stateLock);
         pattern = p;
         if (pattern.length <= 0) pattern.length = juce::jlimit (1, kMaxSteps, (int) pv (PID::steps));
-        auto& cur = slots[(size_t) editSlot];
-        cur.pattern = pattern;
-        for (int k = 0; k < kNumBreaks; ++k) cur.madeFor[(size_t) k] = breaks[(size_t) k].kit;
+        slots[(size_t) editSlot].pattern = pattern;
+        slots[(size_t) editSlot].madeFor = kit;
     }
     if (editSlot == playSlot)
         engine.setPattern (pattern, pv (PID::quantize) > 0.5f && hostPlaying.load());
@@ -531,27 +503,10 @@ void JSliceProcessor::setPattern (const Pattern& p, bool undoable)
 // Pattern slots
 namespace
 {
-    // generator settings stored with each slot
     const char* const kSlotParams[] = { PID::style, PID::complexity, PID::energy, PID::chaos, PID::density, PID::backbone,
                                         PID::ghosts, PID::hats, PID::chop, PID::cut16, PID::rolls, PID::stutter, PID::reverse,
                                         PID::pitchProb, PID::pitchRange, PID::gateProb, PID::variation, PID::fillAmt,
-                                        PID::maxRepeats, PID::humanize, PID::swing, PID::fillOn, PID::fillEvery,
-                                        PID::duoMode, PID::bShare };
-
-    juce::String setToString (const std::set<int>& s)
-    {
-        juce::String out;
-        for (int i : s) out << i << ",";
-        return out;
-    }
-
-    std::set<int> setFromString (const juce::String& str)
-    {
-        std::set<int> out;
-        for (auto& t : juce::StringArray::fromTokens (str, ",", ""))
-            if (t.isNotEmpty()) out.insert (t.getIntValue());
-        return out;
-    }
+                                        PID::maxRepeats, PID::humanize, PID::swing, PID::fillOn, PID::fillEvery };
 }
 
 bool JSliceProcessor::slotUsed (int i) const
@@ -575,29 +530,18 @@ void JSliceProcessor::applySettings (const Slot& s)
         if (auto* v = s.settings.getVarPointer (id))
             if (auto* prm = apvts.getParameter (id))
                 prm->setValueNotifyingHost (prm->convertTo0to1 ((float) *v));
-    regenPending.store (false);    // loading a slot's settings must not re-generate its pattern
-}
-
-Pattern JSliceProcessor::remapToBreaks (Pattern p, const std::array<Kit::Ptr, kNumBreaks>& madeFor) const
-{
-    const int len = p.length;
-    for (int k = 0; k < kNumBreaks; ++k)
-    {
-        const auto& now = breaks[(size_t) k].kit;
-        const auto& was = madeFor[(size_t) k];
-        if (now != nullptr && was != nullptr && was != now && ! was->slices.empty())
-            p = Generator::remap (p, *was, *now, k);
-    }
-    p.length = len;
-    return p;
 }
 
 Pattern JSliceProcessor::slotPattern (int i)
 {
     auto& sl = slots[(size_t) i];
-    sl.pattern = remapToBreaks (sl.pattern, sl.madeFor);
-    for (int k = 0; k < kNumBreaks; ++k)
-        if (breaks[(size_t) k].kit != nullptr) sl.madeFor[(size_t) k] = breaks[(size_t) k].kit;
+    if (kit != nullptr && sl.madeFor != nullptr && sl.madeFor != kit && ! sl.madeFor->slices.empty())
+    {
+        const int len = sl.pattern.length;
+        sl.pattern = Generator::remap (sl.pattern, *sl.madeFor, *kit);
+        sl.pattern.length = len;
+        sl.madeFor = kit;
+    }
     if (sl.pattern.length <= 0) sl.pattern.length = juce::jlimit (1, kMaxSteps, (int) pv (PID::steps));
     return sl.pattern;
 }
@@ -614,14 +558,12 @@ void JSliceProcessor::selectSlot (int i)
     if (i == editSlot && queuedSlot < 0) return;
     captureSettings (slots[(size_t) editSlot]);
     slots[(size_t) editSlot].pattern = pattern;
-    slots[(size_t) editSlot].manual = manualSteps;
     editSlot = i;
     applySettings (slots[(size_t) i]);
     {
         const juce::ScopedLock sl (stateLock);
         pattern = slotPattern (i);
     }
-    manualSteps = slots[(size_t) i].manual;
     if (auto* prm = apvts.getParameter (PID::steps))
         prm->setValueNotifyingHost (prm->convertTo0to1 ((float) pattern.length));
     undoStack.clear();
@@ -642,8 +584,6 @@ void JSliceProcessor::copySlot()
 {
     slotClip = std::make_unique<Slot> (slots[(size_t) editSlot]);
     slotClip->pattern = pattern;
-    slotClip->manual = manualSteps;
-    for (int k = 0; k < kNumBreaks; ++k) slotClip->madeFor[(size_t) k] = breaks[(size_t) k].kit;
     captureSettings (*slotClip);
     sendChangeMessage();
 }
@@ -653,8 +593,13 @@ void JSliceProcessor::pasteSlot()
     if (slotClip == nullptr) return;
     slots[(size_t) editSlot].settings = slotClip->settings;
     applySettings (*slotClip);
-    auto p = remapToBreaks (slotClip->pattern, slotClip->madeFor);
-    manualSteps = slotClip->manual;
+    auto p = slotClip->pattern;
+    if (kit != nullptr && slotClip->madeFor != nullptr && slotClip->madeFor != kit && ! slotClip->madeFor->slices.empty())
+    {
+        const int len = p.length;
+        p = Generator::remap (p, *slotClip->madeFor, *kit);
+        p.length = len;
+    }
     setPattern (p, true);
     if (auto* prm = apvts.getParameter (PID::steps))
         prm->setValueNotifyingHost (prm->convertTo0to1 ((float) pattern.length));
@@ -664,9 +609,6 @@ void JSliceProcessor::clearSlot()
 {
     Pattern p;
     p.length = pattern.length;
-    p.seed = pattern.seed;
-    manualSteps.clear();
-    for (int i = 0; i < kMaxSteps + kStepsPerBar; ++i) manualSteps.insert (i);   // an emptied slot stays empty when the macros move
     setPattern (p, true);
 }
 
@@ -740,73 +682,21 @@ void JSliceProcessor::modifyStep (int index, const std::function<void (Step&)>& 
     if (index >= 0 && index < kMaxSteps) fn (p.steps[(size_t) index]);
     else if (index >= kMaxSteps && index < kMaxSteps + kStepsPerBar) fn (p.fill[(size_t) (index - kMaxSteps)]);
     else return;
-    manualSteps.insert (index);
     setPattern (p, undoable);
-}
-
-Pattern JSliceProcessor::buildPattern (uint32_t seed) const
-{
-    const auto gs = currentGenSettings();
-    const Kit* ka = breaks[0].kit.get();
-    const Kit* kb = isBreakBActive() ? breaks[1].kit.get() : nullptr;
-    Pattern out;
-    if (ka != nullptr && ! ka->slices.empty())
-    {
-        auto a = Generator::generate (*ka, gs, seed, nullptr);
-        for (auto& st : a.steps) st.src = 0;
-        for (auto& st : a.fill)  st.src = 0;
-        if (kb != nullptr && ! kb->slices.empty())
-        {
-            const int mode = (int) pv (PID::duoMode);
-            auto b = Generator::generate (*kb, Generator::settingsForB (gs, mode, pv (PID::bShare)), seed * 31u + 7u, nullptr);
-            out = Generator::combine (a, b, mode, pv (PID::bShare), seed);
-        }
-        else out = a;
-    }
-    else if (kb != nullptr && ! kb->slices.empty())
-    {
-        out = Generator::generate (*kb, gs, seed * 31u + 7u, nullptr);
-        for (auto& st : out.steps) st.src = 1;
-        for (auto& st : out.fill)  st.src = 1;
-    }
-    out.seed = seed;
-    return out;
 }
 
 void JSliceProcessor::generate (std::optional<uint32_t> seed)
 {
-    if (breaks[0].kit == nullptr && breaks[1].kit == nullptr) return;
+    if (kit == nullptr) return;
     const uint32_t s = seed.has_value() ? *seed : (uint32_t) juce::Random::getSystemRandom().nextInt (999999) + 1;
-    auto p = buildPattern (s);
-    p.length = pattern.length;
-    for (size_t i = 0; i < p.steps.size(); ++i) if (pattern.steps[i].locked) p.steps[i] = pattern.steps[i];
-    for (size_t i = 0; i < p.fill.size(); ++i)  if (pattern.fill[i].locked)  p.fill[i] = pattern.fill[i];
-    manualSteps.clear();
-    setPattern (p, true);
-}
-
-void JSliceProcessor::regenerateLive()
-{
-    if (breaks[0].kit == nullptr && breaks[1].kit == nullptr) return;
-    auto p = buildPattern (pattern.seed);
-    p.length = pattern.length;
-    // keep locked steps and the steps edited by hand
-    for (size_t i = 0; i < p.steps.size(); ++i)
-        if (pattern.steps[i].locked || manualSteps.count ((int) i) > 0) p.steps[i] = pattern.steps[i];
-    for (size_t i = 0; i < p.fill.size(); ++i)
-        if (pattern.fill[i].locked || manualSteps.count (kMaxSteps + (int) i) > 0) p.fill[i] = pattern.fill[i];
-    const auto now = juce::Time::getMillisecondCounter();
-    const bool newGesture = now - regenGestureTime > 800;
-    regenGestureTime = now;
-    setPattern (p, newGesture);
+    setPattern (Generator::generate (*kit, currentGenSettings(), s, &pattern), true);
 }
 
 void JSliceProcessor::mutate()
 {
-    if (breaks[0].kit == nullptr && breaks[1].kit == nullptr) return;
+    if (kit == nullptr) return;
     auto p = pattern;
-    const Kit* kits[kNumBreaks] = { breaks[0].kit.get(), breaks[1].kit.get() };
-    Generator::mutateDuo (p, kits, currentGenSettings(), (uint32_t) juce::Random::getSystemRandom().nextInt (999999) + 1);
+    Generator::mutate (p, *kit, currentGenSettings(), (uint32_t) juce::Random::getSystemRandom().nextInt (999999) + 1);
     setPattern (p, true);
 }
 
@@ -866,17 +756,16 @@ void JSliceProcessor::applyStyle (int index)
     set (PID::tailMode, (float) st.tailMode);
     set (PID::tempoMode, (float) st.tempoMode);
     set (PID::swing, st.swing);
-    regenPending.store (false);
     generate();
 }
 
 //==============================================================================
 juce::File JSliceProcessor::exportMidi()
 {
-    auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Kinetik Jungle");
+    auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("J-Slice");
     dir.createDirectory();
     const auto ep = currentEngineParams();
-    const auto name = juce::String ("KJNG-2 ") + juce::String ((int) std::round (lastBpm.load())) + "bpm " + juce::String ((int) pattern.seed);
+    const auto name = juce::String ("J-Slice ") + juce::String ((int) std::round (lastBpm.load())) + "bpm " + juce::String ((int) pattern.seed);
     auto f = dir.getChildFile (juce::File::createLegalFileName (name) + ".mid");
     Exporter::writeMidi (pattern, ep, Exporter::exportBars (ep), lastBpm.load(), f);
     return f;
@@ -884,16 +773,15 @@ juce::File JSliceProcessor::exportMidi()
 
 juce::File JSliceProcessor::exportAudio()
 {
-    auto ka = breaks[0].kit;
-    if (ka == nullptr) return {};
-    auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Kinetik Jungle");
+    if (kit == nullptr) return {};
+    auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("J-Slice");
     dir.createDirectory();
     const auto ep = currentEngineParams();
-    const auto name = juce::String ("KJNG-2 ") + (ka->audio != nullptr ? ka->audio->name : juce::String())
+    const auto name = juce::String ("J-Slice ") + (kit->audio != nullptr ? kit->audio->name : juce::String())
                       + " " + juce::String ((int) std::round (lastBpm.load())) + "bpm " + juce::String ((int) pattern.seed);
     auto f = dir.getChildFile (juce::File::createLegalFileName (name) + ".wav");
     const double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
-    Exporter::renderAudio (ka, pattern, ep, Exporter::exportBars (ep), lastBpm.load(), sr, f, breaks[1].kit);
+    Exporter::renderAudio (kit, pattern, ep, Exporter::exportBars (ep), lastBpm.load(), sr, f);
     return f;
 }
 
@@ -912,18 +800,44 @@ void JSliceProcessor::setFavourites (const juce::StringArray& f)
 }
 
 //==============================================================================
-namespace
+void JSliceProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    juce::ValueTree writeSlot (const Kit* kit, const SlicerSettings& slicer, int slot)
-    {
-        juce::ValueTree st ("BREAK");
-        st.setProperty ("slot", slot, nullptr);
-        st.setProperty ("slMode", slicer.mode, nullptr);
-        st.setProperty ("slSens", slicer.sensitivity, nullptr);
-        st.setProperty ("slGrid", slicer.gridDivision, nullptr);
-        st.setProperty ("slPre", slicer.prerollMs, nullptr);
-        if (kit == nullptr || kit->audio == nullptr) return st;
+    juce::ValueTree st ("JSLICE");
+    st.setProperty ("version", 1, nullptr);
+    st.appendChild (apvts.copyState(), nullptr);
 
+    const juce::ScopedLock sl (stateLock);
+    st.setProperty ("pattern", pattern.toString(), nullptr);
+    // pattern slots (the edited one takes its settings from the parameters, saved above)
+    st.setProperty ("editSlot", editSlot, nullptr);
+    st.setProperty ("chainOn", chainOn, nullptr);
+    {
+        juce::String ch;
+        for (auto& it : chain) ch << it.slot << ":" << it.repeats << ",";
+        st.setProperty ("chain", ch, nullptr);
+    }
+    juce::ValueTree slotsTree ("SLOTS");
+    for (int i = 0; i < kSlots; ++i)
+    {
+        if (i == editSlot) continue;
+        const auto& sl = slots[(size_t) i];
+        bool used = false;
+        for (auto& x : sl.pattern.steps) used |= x.on;
+        if (! used && sl.settings.isEmpty()) continue;
+        juce::ValueTree c ("SLOT");
+        c.setProperty ("index", i, nullptr);
+        c.setProperty ("pattern", sl.pattern.toString(), nullptr);
+        for (auto& nv : sl.settings) c.setProperty ("s_" + nv.name.toString(), nv.value, nullptr);
+        slotsTree.appendChild (c, nullptr);
+    }
+    st.appendChild (slotsTree, nullptr);
+    st.setProperty ("slMode", slicerSettings.mode, nullptr);
+    st.setProperty ("slSens", slicerSettings.sensitivity, nullptr);
+    st.setProperty ("slGrid", slicerSettings.gridDivision, nullptr);
+    st.setProperty ("slPre", slicerSettings.prerollMs, nullptr);
+
+    if (kit != nullptr && kit->audio != nullptr)
+    {
         st.setProperty ("file", kit->audio->file.getFullPathName(), nullptr);
         st.setProperty ("name", kit->audio->name, nullptr);
         st.setProperty ("bpm", kit->bpm, nullptr);
@@ -958,45 +872,7 @@ namespace
                 st.setProperty ("audio", mb, nullptr);
             }
         }
-        return st;
     }
-}
-
-void JSliceProcessor::getStateInformation (juce::MemoryBlock& destData)
-{
-    juce::ValueTree st ("KJNG");
-    st.setProperty ("version", 2, nullptr);
-    st.appendChild (apvts.copyState(), nullptr);
-
-    const juce::ScopedLock sl (stateLock);
-    st.setProperty ("pattern", pattern.toString(), nullptr);
-    st.setProperty ("manual", setToString (manualSteps), nullptr);
-    // pattern slots (the edited one takes its settings from the parameters, saved above)
-    st.setProperty ("editSlot", editSlot, nullptr);
-    st.setProperty ("chainOn", chainOn, nullptr);
-    {
-        juce::String ch;
-        for (auto& it : chain) ch << it.slot << ":" << it.repeats << ",";
-        st.setProperty ("chain", ch, nullptr);
-    }
-    juce::ValueTree slotsTree ("SLOTS");
-    for (int i = 0; i < kSlots; ++i)
-    {
-        if (i == editSlot) continue;
-        const auto& sl = slots[(size_t) i];
-        bool used = false;
-        for (auto& x : sl.pattern.steps) used |= x.on;
-        if (! used && sl.settings.isEmpty()) continue;
-        juce::ValueTree c ("SLOT");
-        c.setProperty ("index", i, nullptr);
-        c.setProperty ("pattern", sl.pattern.toString(), nullptr);
-        c.setProperty ("manual", setToString (sl.manual), nullptr);
-        for (auto& nv : sl.settings) c.setProperty ("s_" + nv.name.toString(), nv.value, nullptr);
-        slotsTree.appendChild (c, nullptr);
-    }
-    st.appendChild (slotsTree, nullptr);
-    for (int k = 0; k < kNumBreaks; ++k)
-        st.appendChild (writeSlot (breaks[(size_t) k].kit.get(), breaks[(size_t) k].slicer, k), nullptr);
 
     juce::MemoryOutputStream os (destData, false);
     st.writeToStream (os);
@@ -1005,24 +881,26 @@ void JSliceProcessor::getStateInformation (juce::MemoryBlock& destData)
 void JSliceProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     auto st = juce::ValueTree::readFromData (data, (size_t) sizeInBytes);
-    if (! st.isValid() || ! (st.hasType ("KJNG") || st.hasType ("JSLICE"))) return;
+    if (! st.isValid() || ! st.hasType ("JSLICE")) return;
 
-    auto loadSlot = [this] (int slot, const juce::ValueTree& b)
+    auto apply = [this, st]
     {
-        auto& sl = breaks[(size_t) slot];
-        sl.slicer.mode = b.getProperty ("slMode", 0);
-        sl.slicer.sensitivity = b.getProperty ("slSens", 0.5f);
-        sl.slicer.gridDivision = b.getProperty ("slGrid", 16);
-        sl.slicer.prerollMs = b.getProperty ("slPre", 1.5f);
-        sl.liveBaseKit = nullptr;
+        auto params = st.getChildWithName (apvts.state.getType());
+        if (params.isValid()) apvts.replaceState (params);
+
+        slicerSettings.mode = st.getProperty ("slMode", 0);
+        slicerSettings.sensitivity = st.getProperty ("slSens", 0.5f);
+        slicerSettings.gridDivision = st.getProperty ("slGrid", 16);
+        slicerSettings.prerollMs = st.getProperty ("slPre", 1.5f);
 
         AudioData::Ptr audio;
-        const juce::File f (b.getProperty ("file").toString());
+        const juce::File f (st.getProperty ("file").toString());
         juce::String err;
         if (f.existsAsFile()) audio = readAudio (f, err);
+
         if (audio == nullptr)
         {
-            if (auto* mb = b.getProperty ("audio").getBinaryData())
+            if (auto* mb = st.getProperty ("audio").getBinaryData())
             {
                 juce::FlacAudioFormat flac;
                 std::unique_ptr<juce::AudioFormatReader> r (flac.createReaderFor (new juce::MemoryInputStream (*mb, false), true));
@@ -1033,78 +911,60 @@ void JSliceProcessor::setStateInformation (const void* data, int sizeInBytes)
                     r->read (&audio->buffer, 0, (int) r->lengthInSamples, 0, true, true);
                     audio->sampleRate = r->sampleRate;
                     audio->file = f;
-                    audio->name = b.getProperty ("name").toString();
+                    audio->name = st.getProperty ("name").toString();
                 }
             }
         }
-        if (audio == nullptr) { setKit (slot, nullptr); return; }
 
-        sl.analysis = Analyzer::analyze (audio->buffer, audio->sampleRate);
-        Kit::Ptr k = new Kit();
-        k->audio = audio;
-        k->bpm = b.getProperty ("bpm", sl.analysis.bpm);
-        k->bars = b.getProperty ("bars", sl.analysis.bars);
-        k->gridOrigin = (int64_t) (juce::int64) b.getProperty ("origin", (juce::int64) sl.analysis.gridOrigin);
-
-        std::vector<Slice> slices;
-        auto sls = b.getChildWithName ("SLICES");
-        for (auto c : sls)
+        if (audio != nullptr)
         {
-            Slice s;
-            s.start = (int64_t) (juce::int64) c.getProperty ("start");
-            s.cls = (HitClass) juce::jlimit (0, kNumClasses - 1, (int) c.getProperty ("cls"));
-            s.userClass = c.getProperty ("user");
-            s.strength = c.getProperty ("str", 0.5f);
-            slices.push_back (s);
-        }
-        if (slices.empty())
-            slices = Analyzer::makeSlices (sl.analysis, audio->buffer, audio->sampleRate, k->bpm, k->bars, k->gridOrigin, sl.slicer);
-        Analyzer::finaliseSlices (slices, audio->buffer.getNumSamples(), audio->sampleRate, k->bpm, k->gridOrigin);
-        auto saved = slices;
-        Analyzer::classify (slices, audio->buffer, audio->sampleRate, k->bpm, k->gridOrigin);
-        if (sls.isValid() && sls.getNumChildren() > 0)
-            for (size_t i = 0; i < slices.size() && i < saved.size(); ++i)
-                slices[i].cls = saved[i].cls;
-        k->slices = std::move (slices);
-        setKit (slot, k);
-    };
+            analysis = Analyzer::analyze (audio->buffer, audio->sampleRate);
+            Kit::Ptr k = new Kit();
+            k->audio = audio;
+            k->bpm = st.getProperty ("bpm", analysis.bpm);
+            k->bars = st.getProperty ("bars", analysis.bars);
+            k->gridOrigin = (int64_t) (juce::int64) st.getProperty ("origin", (juce::int64) analysis.gridOrigin);
 
-    auto apply = [this, st, loadSlot]
-    {
-        restoringState = true;
-        auto params = st.getChildWithName (apvts.state.getType());
-        if (params.isValid()) apvts.replaceState (params);
+            std::vector<Slice> slices;
+            auto sls = st.getChildWithName ("SLICES");
+            for (auto c : sls)
+            {
+                Slice s;
+                s.start = (int64_t) (juce::int64) c.getProperty ("start");
+                s.cls = (HitClass) juce::jlimit (0, kNumClasses - 1, (int) c.getProperty ("cls"));
+                s.userClass = c.getProperty ("user");
+                s.strength = c.getProperty ("str", 0.5f);
+                slices.push_back (s);
+            }
+            if (slices.empty())
+                slices = Analyzer::makeSlices (analysis, audio->buffer, audio->sampleRate, k->bpm, k->bars, k->gridOrigin, slicerSettings);
+            Analyzer::finaliseSlices (slices, audio->buffer.getNumSamples(), audio->sampleRate, k->bpm, k->gridOrigin);
 
-        if (st.hasType ("JSLICE"))
-        {
-            loadSlot (0, st);                // version 1 : one break stored at the root
-            setKit (1, nullptr);
-        }
-        else
-        {
-            for (int k = 0; k < kNumBreaks; ++k) setKit (k, nullptr);
-            for (auto b : st)
-                if (b.hasType ("BREAK"))
-                    loadSlot (juce::jlimit (0, kNumBreaks - 1, (int) b.getProperty ("slot", 0)), b);
+            // recompute spectral features but keep the saved classes
+            auto saved = slices;
+            Analyzer::classify (slices, audio->buffer, audio->sampleRate, k->bpm, k->gridOrigin);
+            if (sls.isValid() && sls.getNumChildren() > 0)
+                for (size_t i = 0; i < slices.size() && i < saved.size(); ++i)
+                    slices[i].cls = saved[i].cls;
+            k->slices = std::move (slices);
+            {
+                const juce::ScopedLock sl (stateLock);
+                kit = k;
+            }
+            pushKit();
         }
 
         undoStack.clear();
         redoStack.clear();
-        manualSteps = setFromString (st.getProperty ("manual").toString());
-
-        auto clampStep = [this] (Step& s)
-        {
-            auto k = breaks[(size_t) juce::jlimit (0, kNumBreaks - 1, (int) s.src)].kit;
-            const int n = k != nullptr ? (int) k->slices.size() : 0;
-            if (n == 0) { if (s.on) s = Step(); return; }
-            s.slice = (int16_t) juce::jlimit (0, n - 1, (int) s.slice);
-        };
         auto p = Pattern::fromString (st.getProperty ("pattern").toString());
-        for (auto& s : p.steps) clampStep (s);
-        for (auto& s : p.fill)  clampStep (s);
-
-        // pattern slots and chain
-        for (auto& sl : slots) sl = Slot();
+        if (kit != nullptr)
+        {
+            const int n = (int) kit->slices.size();
+            for (auto& s : p.steps) s.slice = (int16_t) juce::jlimit (0, juce::jmax (0, n - 1), (int) s.slice);
+            for (auto& s : p.fill)  s.slice = (int16_t) juce::jlimit (0, juce::jmax (0, n - 1), (int) s.slice);
+        }
+        // pattern slots
+        for (auto& sl : slots) { sl = Slot(); }
         editSlot = juce::jlimit (0, kSlots - 1, (int) st.getProperty ("editSlot", 0));
         playSlot = editSlot; queuedSlot = -1;
         engine.cancelQueue();
@@ -1114,10 +974,13 @@ void JSliceProcessor::setStateInformation (const void* data, int sizeInBytes)
             if (i < 0 || i >= kSlots || i == editSlot) continue;
             auto& sl = slots[(size_t) i];
             sl.pattern = Pattern::fromString (c.getProperty ("pattern").toString());
-            for (auto& x : sl.pattern.steps) clampStep (x);
-            for (auto& x : sl.pattern.fill)  clampStep (x);
-            sl.manual = setFromString (c.getProperty ("manual").toString());
-            for (int k = 0; k < kNumBreaks; ++k) sl.madeFor[(size_t) k] = breaks[(size_t) k].kit;
+            if (kit != nullptr)
+            {
+                const int n = (int) kit->slices.size();
+                for (auto& x : sl.pattern.steps) x.slice = (int16_t) juce::jlimit (0, juce::jmax (0, n - 1), (int) x.slice);
+                for (auto& x : sl.pattern.fill)  x.slice = (int16_t) juce::jlimit (0, juce::jmax (0, n - 1), (int) x.slice);
+            }
+            sl.madeFor = kit;
             for (int k = 0; k < c.getNumProperties(); ++k)
             {
                 const auto name = c.getPropertyName (k).toString();
@@ -1133,8 +996,6 @@ void JSliceProcessor::setStateInformation (const void* data, int sizeInBytes)
         chainPos = 0; chainReps = 0; lastLoop = -1;
 
         setPattern (p, false);
-        regenPending.store (false);
-        restoringState = false;
         sendChangeMessage();
     };
 

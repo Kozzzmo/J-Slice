@@ -4,15 +4,11 @@
 
 class JSliceProcessor;
 
-/** Display of one break (A or B) : waveform, beat grid and the slice markers (editable). */
+/** Display showing the break, the beat grid and the slice markers (editable). */
 class WaveformView : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    WaveformView (JSliceProcessor& p, int slot);
-
-    std::function<void()> onActivate;   // clicked : this break becomes the one edited by the slicer row
-    std::function<void()> onEmptyClick; // clicked while empty : open a file
-    bool dimmed = false;                // break B switched off
+    explicit WaveformView (JSliceProcessor& p);
 
     void refresh();                 // kit changed
     void tick();                    // ~30 Hz playback feedback
@@ -37,7 +33,6 @@ private:
     void showSliceMenu (int slice);
 
     JSliceProcessor& proc;
-    const int slot;
     bc::Kit::Ptr kit;
     std::vector<std::pair<float, float>> peaks;
     int hoverMarker = -1, dragMarker = -1, selected = -1, playingSlice = -1;

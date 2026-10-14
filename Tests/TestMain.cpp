@@ -282,7 +282,7 @@ int main (int argc, char** argv)
     {
         Engine eng;
         eng.prepare (48000.0, 512);
-        eng.setKit (0, kit);
+        eng.setKit (kit);
         Pattern a, b;
         a.length = 16; b.length = 32;
         a.steps[0].on = true; a.steps[0].slice = 0;
@@ -322,119 +322,6 @@ int main (int argc, char** argv)
 
         auto r = Generator::generate (*kit, getStyles()[3].defaults, 43, &p);
         check (r.steps[3] == p.steps[3], "locked step survives regeneration");
-    }
-
-    // ---- duo : two breaks sharing the steps
-    std::printf ("\n== Duo (break A + break B)\n");
-    {
-        std::vector<Truth> truthB;
-        auto audioB = makeBreak (sr, 112.0, 2, truthB);
-        auto anB = Analyzer::analyze (audioB, sr);
-        AudioData::Ptr adB = new AudioData();
-        adB->buffer = audioB; adB->sampleRate = sr; adB->name = "synthetic B";
-        Kit::Ptr kitB = new Kit();
-        kitB->audio = adB; kitB->bpm = anB.bpm; kitB->bars = anB.bars; kitB->gridOrigin = anB.gridOrigin;
-        kitB->slices = Analyzer::makeSlices (anB, audioB, sr, anB.bpm, anB.bars, anB.gridOrigin, {});
-        Analyzer::classify (kitB->slices, audioB, sr, anB.bpm, anB.gridOrigin);
-
-        const auto gs = getStyles()[0].defaults;
-        for (int mode = 0; mode < 3; ++mode)
-        {
-            int bHits = 0, aHits = 0, aBackbone = 0, aBackboneKept = 0;
-            bool valid = true;
-            for (uint32_t seed = 1; seed <= 10; ++seed)
-            {
-                auto a = Generator::generate (*kit, gs, seed, nullptr);
-                auto b = Generator::generate (*kitB, Generator::settingsForB (gs, mode, 0.5f), seed * 31u + 7u, nullptr);
-                auto d = Generator::combine (a, b, mode, 0.5f, seed);
-                for (size_t i = 0; i < d.steps.size(); ++i)
-                {
-                    const auto& st = d.steps[i];
-                    if (! st.on) continue;
-                    const auto& k = st.src == 0 ? *kit : *kitB;
-                    if (st.slice < 0 || st.slice >= (int) k.slices.size()) valid = false;
-                    (st.src == 0 ? aHits : bHits)++;
-                    // a step taken from A must be A's own step, a step from B must be B's own step
-                    const auto& orig = st.src == 0 ? a.steps[i] : b.steps[i];
-                    if (! orig.on || orig.slice != st.slice) valid = false;
-                }
-                for (size_t i = 0; i < a.steps.size(); i += 4)
-                {
-                    const auto& st = a.steps[i];
-                    if (! st.on || (st.role != HitClass::Kick && st.role != HitClass::Snare)) continue;
-                    ++aBackbone;
-                    aBackboneKept += d.steps[i].on && d.steps[i].src == 0;
-                }
-                auto d2 = Generator::combine (a, b, mode, 0.5f, seed);
-                if (! (d == d2)) valid = false;
-            }
-            std::printf ("  %-16s A hits %5.1f | B hits %5.1f | A kick/snare on beats kept %d/%d\n",
-                         duoModeNames()[mode].toRawUTF8(), aHits / 10.0, bHits / 10.0, aBackboneKept, aBackbone);
-            check (valid, "duo mode " + duoModeNames()[mode] + " : every hit comes from its own break, deterministic");
-            check (bHits > 20 && aHits > 20, "duo mode " + duoModeNames()[mode] + " : both breaks play");
-            if (mode != 1) check (aBackboneKept >= aBackbone * 9 / 10, "duo mode " + duoModeNames()[mode] + " : A keeps its backbone");
-        }
-
-        // share 0 -> 1 gives B more room
-        {
-            auto a = Generator::generate (*kit, gs, 5, nullptr);
-            auto b = Generator::generate (*kitB, gs, 5 * 31u + 7u, nullptr);
-            int lo = 0, hi = 0;
-            for (auto& st : Generator::combine (a, b, 0, 0.0f, 5).steps) lo += st.on && st.src == 1;
-            for (auto& st : Generator::combine (a, b, 0, 1.0f, 5).steps) hi += st.on && st.src == 1;
-            std::printf ("  B share 0 -> 1 : %d -> %d B hits\n", lo, hi);
-            check (hi > lo, "B share gives break B more steps");
-        }
-
-        // mutation keeps every hit inside its own break
-        {
-            auto d = Generator::combine (Generator::generate (*kit, gs, 9, nullptr), Generator::generate (*kitB, gs, 9 * 31u + 7u, nullptr), 0, 0.5f, 9);
-            const Kit* kits[kNumBreaks] = { kit.get(), kitB.get() };
-            bool ok = true;
-            for (uint32_t m = 1; m <= 20; ++m)
-            {
-                Generator::mutateDuo (d, kits, gs, m);
-                for (auto& st : d.steps)
-                    if (st.on && (st.slice < 0 || st.slice >= (int) kits[st.src]->slices.size())) ok = false;
-            }
-            check (ok, "duo mutation keeps valid slices for both breaks");
-        }
-
-        // MIDI export : B on its own note range
-        {
-            auto d = Generator::combine (Generator::generate (*kit, gs, 3, nullptr), Generator::generate (*kitB, gs, 3 * 31u + 7u, nullptr), 0, 0.5f, 3);
-            EngineParams ep; ep.patternSteps = 64;
-            auto f = outDir.getChildFile ("duo_render.wav");
-            Exporter::renderAudio (kit, d, ep, 4, 172.0, 44100.0, f, kitB);
-            check (f.getSize() > 10000, "duo render (A + B) written");
-        }
-    }
-
-    // ---- live macros : same seed, moving a macro only adds / removes what crosses its threshold
-    std::printf ("\n== Live macros\n");
-    {
-        auto gs = getStyles()[0].defaults;
-        auto base = Generator::generate (*kit, gs, 77, nullptr);
-        auto same = Generator::generate (*kit, gs, 77, nullptr);
-        check (base == same, "same seed + same settings = same pattern");
-        int prevOn = 0, monotonic = 1;
-        std::vector<int> changes;
-        Pattern prev = base;
-        for (int i = 0; i <= 10; ++i)
-        {
-            auto g2 = gs;
-            g2.density = juce::jlimit (0.0f, 1.0f, gs.density * 0.5f + 0.05f * (float) i);
-            auto p = Generator::generate (*kit, g2, 77, nullptr);
-            int on = 0, diff = 0;
-            for (size_t k = 0; k < p.steps.size(); ++k) { on += p.steps[k].on; diff += ! (p.steps[k] == prev.steps[k]); }
-            if (i > 0) { changes.push_back (diff); if (on + 2 < prevOn) monotonic = 0; }
-            prevOn = on;
-            prev = p;
-        }
-        int maxChange = 0; for (int c : changes) maxChange = juce::jmax (maxChange, c);
-        std::printf ("  density sweep : biggest change between two neighbour settings = %d steps / 128\n", maxChange);
-        check (monotonic == 1, "more density never removes hits (within 2)");
-        check (maxChange <= 40, "a small macro move changes a part of the pattern, not all of it");
     }
 
     // ---- render demo loops

@@ -6,17 +6,13 @@
 namespace ui
 {
 
-/** "Palet" knob : solid disc with the value written in the centre, thin value arc, caption under it. */
+/** Knob : dotted ring + pointer, mono label under it, big serif value under the label. */
 struct Knob : public juce::Component, private juce::Slider::Listener
 {
     Knob (juce::AudioProcessorValueTreeState& s, const juce::String& paramId, const juce::String& caption);
     ~Knob() override;
     void resized() override;
     void paint (juce::Graphics&) override;
-    void paintOverChildren (juce::Graphics&) override;
-    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
-    void mouseExit (const juce::MouseEvent&) override  { repaint(); }
-    void mouseUp (const juce::MouseEvent&) override    { repaint(); }
 
     juce::Slider slider;
     juce::String caption;
@@ -26,8 +22,6 @@ struct Knob : public juce::Component, private juce::Slider::Listener
 
 private:
     void sliderValueChanged (juce::Slider*) override { repaint(); }
-    void sliderDragStarted (juce::Slider*) override  { repaint(); }
-    void sliderDragEnded (juce::Slider*) override    { repaint(); }
 };
 
 /** Compact read-out box (tiny label + big serif value + optional dotted position bar).
@@ -65,63 +59,6 @@ private:
     juce::String lastText;
     bool dragging = false;
     std::unique_ptr<juce::TextEditor> editor;
-};
-
-/** Horizontal bar : caption on the left, filled bar, value on the right. Drag or wheel to change. */
-class HBar : public juce::Component, public juce::SettableTooltipClient
-{
-public:
-    explicit HBar (const juce::String& caption);
-    std::function<double()> get;                 // 0..1
-    std::function<void (double, bool first)> set;  // first = first change of the gesture (undo point)
-    std::function<juce::String (double)> format;
-    std::function<void()> onRelease;
-    juce::Colour colour;
-    juce::String caption;
-
-    void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override;
-    void mouseDrag (const juce::MouseEvent&) override;
-    void mouseUp (const juce::MouseEvent&) override;
-    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
-
-private:
-    juce::Rectangle<float> barArea() const;
-    void setFromX (float x);
-    bool first = true, dragging = false;
-};
-
-/** Macro fader with named zones (COMPLEXITY : CLEAN / LIGHT / CHOPPY / WILD / MAD).
-    Centre = the style as is, left = less, right = more. Gentle detents on the zones ;
-    click a zone name to jump there ; double-click = back to the centre. */
-class ZoneFader : public juce::Component, public juce::SettableTooltipClient, private juce::AudioProcessorParameter::Listener, private juce::AsyncUpdater
-{
-public:
-    ZoneFader (juce::AudioProcessorValueTreeState& s, const juce::String& paramId, const juce::String& caption, juce::StringArray zones);
-    ~ZoneFader() override;
-
-    void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override;
-    void mouseDrag (const juce::MouseEvent&) override;
-    void mouseUp (const juce::MouseEvent&) override;
-    void mouseDoubleClick (const juce::MouseEvent&) override;
-    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
-    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
-    void mouseExit (const juce::MouseEvent&) override  { repaint(); }
-
-private:
-    void parameterValueChanged (int, float) override { triggerAsyncUpdate(); }
-    void parameterGestureChanged (int, bool) override {}
-    void handleAsyncUpdate() override { repaint(); }
-    juce::Rectangle<float> track() const;
-    float valueForX (float x, bool detent) const;
-    void setValue (float v);
-
-    juce::RangedAudioParameter* param = nullptr;
-    juce::String caption;
-    juce::StringArray zones;
-    bool dragging = false;
-    float dragStartV = 0.0f;
 };
 
 /** Toggle button bound to a bool parameter (on = filled with the accent colour). */

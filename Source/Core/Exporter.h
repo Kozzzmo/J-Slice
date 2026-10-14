@@ -38,7 +38,7 @@ struct Exporter
             {
                 const double on = (t0 + j * (t1 - t0) / roll) / 4.0 * tpq;
                 const double len = (t1 - t0) / roll / 4.0 * tpq * juce::jlimit (0.1f, 1.0f, st.gate) * 0.95;
-                const int note = juce::jlimit (0, 127, (st.src == 1 ? kFirstSliceNoteB : kFirstSliceNote) + st.slice);
+                const int note = juce::jlimit (0, 127, kFirstSliceNote + st.slice);
                 seq.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) st.vel), on);
                 seq.addEvent (juce::MidiMessage::noteOff (1, note), on + juce::jmax (10.0, len));
             }
@@ -57,7 +57,7 @@ struct Exporter
 
     /** Renders the loop exactly as the plugin plays it (pitch, reverse, rolls, FX) to a WAV file. */
     static bool renderAudio (Kit::Ptr kit, const Pattern& pat, const EngineParams& p, int bars, double bpm,
-                             double sampleRate, const juce::File& file, Kit::Ptr kitB = {})
+                             double sampleRate, const juce::File& file)
     {
         if (kit == nullptr) return false;
         const int64_t total = (int64_t) std::round (bars * 4.0 * 60.0 / bpm * sampleRate);
@@ -67,8 +67,7 @@ struct Exporter
         Engine eng;
         const int block = 256;
         eng.prepare (sampleRate, block);
-        eng.setKit (0, kit);
-        if (kitB != nullptr) eng.setKit (1, kitB);
+        eng.setKit (kit);
         eng.setPattern (pat, false);
         juce::AudioBuffer<float> tmp (2, block);
         juce::MidiBuffer midi;

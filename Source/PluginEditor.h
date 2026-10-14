@@ -5,7 +5,6 @@
 #include "UI/Widgets.h"
 #include "UI/WaveformView.h"
 #include "UI/StepGrid.h"
-#include "UI/Inspector.h"
 #include "UI/BrowserPanel.h"
 #include "UI/PatternBar.h"
 #include <map>
@@ -18,21 +17,13 @@ struct Page : public juce::Component
     std::vector<Group> groups;
 };
 
-/** Identity card of one break : letter, tempo, bars, slices, file name, previous / next file (and ON for B). */
-struct BreakCard : public juce::Component, public juce::SettableTooltipClient
+/** "BREAK  <file name>" read-out ; click = file dialog. */
+struct NameBox : public juce::Component, public juce::SettableTooltipClient
 {
-    BreakCard (JSliceProcessor& p, int slot);
     void paint (juce::Graphics&) override;
-    void resized() override;
     void mouseUp (const juce::MouseEvent&) override { if (onClick) onClick(); }
-
-    JSliceProcessor& proc;
-    const int slot;
-    bool active = false;
+    juce::String name;
     std::function<void()> onClick;
-    std::function<void (int delta)> onSibling;
-    juce::TextButton prevBtn { "<" }, nextBtn { ">" };
-    std::unique_ptr<ui::ParamToggle> onBtn;
 };
 
 //==============================================================================
@@ -49,22 +40,20 @@ public:
     void resized() override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
-    void filesDropped (const juce::StringArray& files, int x, int y) override;
+    void filesDropped (const juce::StringArray& files, int, int) override;
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
     void refreshAll();
-    void loadFile (int slot, const juce::File& f);
-    void openFileDialog (int slot);
-    void setActiveSlot (int slot);
+    void loadFile (const juce::File& f);
+    void openFileDialog();
     void showTab (int t);
     void applySkin (int index);
     void pushSlicer();
     void setBreakBpm (double bpm);
     void setBreakBars (int bars);
     void showError (const juce::String& msg);
-    void refreshZoom();
     void mouseUp (const juce::MouseEvent&) override;
     void showUpdateDialog();
 
@@ -75,46 +64,40 @@ private:
     JSliceProcessor& proc;
     ui::LookAndFeel lnf;
     juce::TooltipWindow tooltips { this, 700 };
-    int activeSlot = 0;
 
     // header
     ui::ValueBox swingBox { "Swing" }, pitchBox { "Pitch" }, bpmBox { "BPM" };
-    juce::TextButton browseBtn { "Browse" }, playBtn { "Play" }, skinBtn { "Skin" };
+    NameBox nameBox;
+    juce::TextButton prevBtn { "<" }, nextBtn { ">" }, browseBtn { "Browse" }, playBtn { "Play" };
     ui::ParamToggle syncBtn;
 
-    // the two breaks
-    BreakCard cardA, cardB;
-    WaveformView waveA, waveB;
-
-    // slicer row (edits the active break)
+    // break display + slicer
+    WaveformView wave;
     juce::ComboBox sliceMode, gridDiv;
     ui::ValueBox sensBox { "Sensitivity" }, prerollBox { "Pre-roll" }, breakBpmBox { "Break BPM" }, breakBarsBox { "Bars" };
     juce::TextButton halfBtn { "/2" }, dblBtn { "x2" }, detectBtn { "Auto" };
     juce::ToggleButton keepPattern { "Keep groove on load" };
 
-    // pattern slots + chain
-    PatternBar patternBar { proc };
-
-    // lanes
+    // sequencer
     StepGrid grid;
-    Inspector inspector;
-    juce::TextButton pagePrev { "<" }, pageNext { ">" }, fillViewBtn { "Fill" }, undoBtn { "Undo" }, redoBtn { "Redo" };
-    juce::OwnedArray<juce::TextButton> zoomBtns;
-    ui::ParamChoice duoBox;
-    ui::ValueBox shareBox { "B share" }, stepsBox { "Length" };
+    PatternBar patternBar { proc };
+    ui::ParamToggle seqBtn;
+    juce::TextButton minusBtn { "-" }, plusBtn { "+" };
+    ui::ValueBox stepsBox { "Length" };
+    ui::ParamChoice fillEvery;
+    juce::TextButton undoBtn { "Undo" }, redoBtn { "Redo" }, clearLocksBtn { "-Locks" };
+    juce::TextEditor seedEdit;
+    juce::OwnedArray<juce::TextButton> modeBtns;   // Notes, Delay, Reverb, Lo-fi, Filter
+    juce::TextButton clearFxBtn { "Clear FX" };
 
-    // generator
+    // generator panel
     juce::ComboBox styleBox;
     juce::TextButton generateBtn { "Generate" }, mutateBtn { "Mutate" }, fillBtn { "Fill!" };
-    ui::ParamToggle autoFillBtn;
-    ui::ParamChoice fillEvery;
-    std::unique_ptr<ui::ZoneFader> complexityFader, energyFader, chaosFader;
+    std::unique_ptr<ui::Knob> complexityKnob, energyKnob, chaosKnob;
 
     // bottom tabs
-    juce::TextButton tabGen { "Details" }, tabPlay { "Playback" }, tabColour { "Colour" }, tabSpace { "Space" };
+    juce::TextButton tabGen { "Generator" }, tabPlay { "Playback" }, tabColour { "Colour" }, tabSpace { "Space" }, skinBtn { "Skin" };
     Page pageGen, pagePlay, pageColour, pageSpace;
-    juce::TextEditor seedEdit;
-    juce::TextButton clearLocksBtn { "-Locks" }, clearFxBtn { "-FX" };
 
     std::vector<std::unique_ptr<juce::Component>> owned;
     std::map<juce::String, juce::Component*> byId;
@@ -124,8 +107,6 @@ private:
     juce::String errorText;
     int errorTicks = 0;
     int lastSteps = -1, lastFill = -1;
-    bool lastBActive = false;
-    juce::String lastPageTitle;
     int lastUpdState = -1;
     bool updWaiting = false;   // "Check now" pressed: show the result when it arrives
 

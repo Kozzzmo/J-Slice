@@ -138,10 +138,7 @@ namespace
         const Kit& kit;
         GenSettings s;
         const StyleDef& style;
-        // Keyed randomness : every decision is drawn from hash (seed, position, n-th draw at that position).
-        // Moving a macro therefore only changes the decisions whose threshold it crosses ; the rest of the
-        // pattern stays put (macros feel continuous instead of re-rolling everything).
-        uint32_t seed = 1, key = 0, ctr = 0;
+        juce::Random rng;
         std::array<std::vector<int>, kNumClasses> byClass;   // sorted by quality (best first)
         std::vector<int> sliceAtStep;                         // source 16th -> slice (or -1)
         std::vector<int> goodStarts;                          // source steps that start with a strong hit
@@ -149,11 +146,10 @@ namespace
         int mainKick = -1, mainSnare = -1, altSnare = -1;
         int srcSteps = 16;
 
-        Ctx (const Kit& k, const GenSettings& gs, uint32_t seed_)
+        Ctx (const Kit& k, const GenSettings& gs, uint32_t seed)
             : kit (k), s (gs), style (getStyles()[(size_t) juce::jlimit (0, (int) getStyles().size() - 1, gs.style)]),
-              seed (seed_ * 2654435761u + 0x9e3779b9u)
+              rng ((juce::int64) seed * 7919 + 17)
         {
-            at (-1);
             srcSteps = kit.sourceSteps();
             anchors = parseAnchors (style.anchors);
             const int n = (int) kit.slices.size();
@@ -195,28 +191,15 @@ namespace
                 auto& list = byClass[(size_t) c];
                 if (list.empty()) return -1;
                 const int topN = juce::jmin ((int) list.size(), 1 + (int) std::round (gs.variation * 2.0f));
-                return list[(size_t) ri (topN)];
+                return list[(size_t) rng.nextInt (topN)];
             };
             mainKick = pickMain (HitClass::Kick);
             mainSnare = pickMain (HitClass::Snare);
             auto& sn = byClass[(size_t) HitClass::Snare];
-            altSnare = sn.size() > 1 ? sn[(size_t) ri ((int) juce::jmin<size_t> (sn.size(), 3))] : mainSnare;
+            altSnare = sn.size() > 1 ? sn[(size_t) rng.nextInt ((int) juce::jmin<size_t> (sn.size(), 3))] : mainSnare;
         }
 
-        void at (int k) { key = (uint32_t) (k + 1000000); ctr = 0; }
-
-        float rf()
-        {
-            uint64_t z = ((uint64_t) seed << 32) ^ ((uint64_t) key * 0x9E3779B97F4A7C15ull) ^ ((uint64_t) (ctr++) * 0xBF58476D1CE4E5B9ull);
-            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-            z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-            z ^= z >> 31;
-            return (float) ((z >> 40) & 0xFFFFFF) / 16777216.0f;
-        }
-
-        int ri (int n) { return n <= 1 ? 0 : juce::jmin (n - 1, (int) (rf() * (float) n)); }
-
-        bool chance (float p) { return rf() < p; }
+        bool chance (float p) { return rng.nextFloat() < p; }
 
         HitClass clsOf (int slice) const { return kit.slices[(size_t) slice].cls; }
 
@@ -242,16 +225,16 @@ namespace
             {
                 if (c == HitClass::Hat) return -1;
                 // fallback : any slice
-                return kit.slices.empty() ? -1 : ri ((int) kit.slices.size());
+                return kit.slices.empty() ? -1 : rng.nextInt ((int) kit.slices.size());
             }
             const int topN = juce::jmin ((int) list.size(), 2 + (int) std::round (s.variation * 3.0f));
-            return list[(size_t) ri (topN)];
+            return list[(size_t) rng.nextInt (topN)];
         }
 
         int goodStart()
         {
             if (goodStarts.empty()) return 0;
-            return goodStarts[(size_t) ri ((int) goodStarts.size())];
+            return goodStarts[(size_t) rng.nextInt ((int) goodStarts.size())];
         }
 
         int containingSlice (int srcStep) const
@@ -271,7 +254,7 @@ namespace
         uint8_t vel (int base, int spread = 10)
         {
             const int h = (int) std::round (s.humanize * (float) spread);
-            const int v = base + (h > 0 ? ri (2 * h + 1) - h : 0);
+            const int v = base + (h > 0 ? rng.nextInt (2 * h + 1) - h : 0);
             return (uint8_t) juce::jlimit (1, 127, v);
         }
 
@@ -308,12 +291,10 @@ namespace
         std::vector<char> trig ((size_t) P, 0), stutter ((size_t) P, 0);
 
         // ---- 1. cut partition (odd-sized blocks, repeats, stutter endings)
-        c.at (90000 + firstAbsStep);
         const int unit = c.chance (c.s.cut16) ? 1 : 2;
         int pos = 0;
         while (pos < P)
         {
-            c.at (10000 + firstAbsStep + pos);
             const int left = P - pos;
             if (left <= 8 && left >= 2 && c.chance (c.s.stutter * 0.5f))
             {
@@ -328,14 +309,14 @@ namespace
                 break;
             }
 
-            const float r = c.rf();
+            const float r = c.rng.nextFloat();
             int lenU = r < 0.25f ? 1 : (r < 0.85f ? 3 : (c.s.chop > 0.5f ? 5 : 3));
             int lenSteps = lenU * unit;
             while (lenSteps > left && lenU > 1) { lenU -= 2; lenSteps = lenU * unit; }
             if (lenSteps > left) lenSteps = left;
 
             const bool jump = c.chance (c.s.chop);
-            int reps = jump || c.chance (c.s.chop * 0.5f) ? 1 + c.ri (juce::jmax (1, c.s.maxRepeats)) : 1;
+            int reps = jump || c.chance (c.s.chop * 0.5f) ? 1 + c.rng.nextInt (juce::jmax (1, c.s.maxRepeats)) : 1;
             if (reps * lenSteps > left) { lenSteps = left; reps = 1; }
 
             const int absStep = firstAbsStep + pos;
@@ -352,7 +333,6 @@ namespace
         // ---- 2. events following the (re-arranged) break
         for (int i = 0; i < P; ++i)
         {
-            c.at (20000 + firstAbsStep + i);
             Step st;
             const int sp = (int) srcPos[(size_t) i];
             if (sp >= 0)
@@ -372,7 +352,6 @@ namespace
         // ---- 3. style skeleton (backbone) and template hits
         for (int i = 0; i < P; ++i)
         {
-            c.at (30000 + firstAbsStep + i);
             const int t32 = (firstAbsStep + i) % 32;
             auto& st = out[i];
 
@@ -416,7 +395,7 @@ namespace
                 const float ps = templateValue (c.style.snare, t32) * c.s.density;
                 const float pg = templateValue (c.style.ghost, t32) * c.s.ghosts;
                 const float ph = templateValue (c.style.hat, t32) * c.s.hats;
-                const float r = c.rf();
+                const float r = c.rng.nextFloat();
                 if (r < pk)                          { const int sl = c.pick (HitClass::Kick);  if (sl >= 0) st = c.makeStep (sl, HitClass::Kick, 104); }
                 else if (r < pk + ps)                { const int sl = c.pick (HitClass::Snare); if (sl >= 0) st = c.makeStep (sl, HitClass::Snare, 106); }
                 else if (r < pk + ps + pg)           { const int sl = c.pick (HitClass::Ghost); if (sl >= 0) st = c.makeStep (sl, HitClass::Ghost, 48); }
@@ -431,7 +410,6 @@ namespace
         // ---- 4. ornaments
         for (int i = 0; i < P; ++i)
         {
-            c.at (40000 + firstAbsStep + i);
             auto& st = out[i];
             if (! st.on) continue;
             const int t32 = (firstAbsStep + i) % 32;
@@ -445,7 +423,7 @@ namespace
                 const float w = inBar >= 12 ? 1.0f : (inBar % 2 == 1 ? 0.6f : 0.35f);
                 if (c.chance (c.s.rolls * w))
                 {
-                    const float r = c.rf();
+                    const float r = c.rng.nextFloat();
                     st.roll = r < 0.6f ? 2 : (r < 0.75f ? 3 : 4);
                 }
             }
@@ -464,14 +442,14 @@ namespace
 
             if (c.chance (c.s.pitchProb) && c.s.pitchRange > 0)
             {
-                const int amt = 1 + c.ri (c.s.pitchRange);
+                const int amt = 1 + c.rng.nextInt (c.s.pitchRange);
                 st.pitch = (int8_t) (c.chance (0.65f) ? amt : -amt);
             }
 
             if (! anchor && c.chance (c.s.gateProb))
             {
                 const float g[] = { 0.3f, 0.5f, 0.7f };
-                st.gate = g[c.ri (3)];
+                st.gate = g[c.rng.nextInt (3)];
             }
         }
     }
@@ -481,8 +459,7 @@ namespace
     {
         for (int op = 0; op < numOps; ++op)
         {
-            c.at (50000 + firstAbsStep * 16 + op);
-            const int i = c.ri (numSteps);
+            const int i = c.rng.nextInt (numSteps);
             auto& st = bar[i];
             if (st.locked) continue;
             const int t32 = (firstAbsStep + i) % 32;
@@ -491,7 +468,7 @@ namespace
             const float wSwap = 0.30f, wGhost = 0.20f, wRoll = 0.15f * (0.3f + c.s.rolls), wShift = 0.10f,
                         wRev = 0.15f * c.s.reverse, wPitch = 0.15f * c.s.pitchProb, wJump = 0.25f * c.s.chop;
             const float total = wSwap + wGhost + wRoll + wShift + wRev + wPitch + wJump;
-            float r = c.rf() * total;
+            float r = c.rng.nextFloat() * total;
 
             if ((r -= wSwap) < 0)
             {
@@ -504,7 +481,7 @@ namespace
             }
             else if ((r -= wRoll) < 0)
             {
-                if (st.on && ! anchor) st.roll = st.roll > 1 ? 1 : (uint8_t) (2 + c.ri (3));
+                if (st.on && ! anchor) st.roll = st.roll > 1 ? 1 : (uint8_t) (2 + c.rng.nextInt (3));
             }
             else if ((r -= wShift) < 0)
             {
@@ -521,7 +498,7 @@ namespace
             }
             else if ((r -= wPitch) < 0)
             {
-                if (st.on) st.pitch = (int8_t) (st.pitch != 0 ? 0 : (c.chance (0.6f) ? 1 : -1) * (1 + c.ri (juce::jmax (1, c.s.pitchRange))));
+                if (st.on) st.pitch = (int8_t) (st.pitch != 0 ? 0 : (c.chance (0.6f) ? 1 : -1) * (1 + c.rng.nextInt (juce::jmax (1, c.s.pitchRange))));
             }
             else
             {
@@ -563,7 +540,6 @@ namespace
                 continue;
             }
             if (anchor) continue;
-            c.at (80000 + firstAbsStep + i);     // keyed : moving the density only removes the hits whose threshold it crosses
             if (maxAnchors < 99 || ! c.chance (keep)) st = Step();
         }
 
@@ -574,7 +550,6 @@ namespace
                 bool any = false;
                 for (int i = b0; i < juce::jmin (numSteps, b0 + kStepsPerBar); ++i) any = any || bar[i].on;
                 if (any || bar[b0].locked) continue;
-                c.at (85000 + firstAbsStep + b0);
                 const int sl = c.pick (HitClass::Kick);
                 if (sl >= 0) bar[b0] = c.makeStep (sl, HitClass::Kick, 118);
             }
@@ -583,7 +558,6 @@ namespace
     //==========================================================================
     void genFill (Ctx& c, Pattern& p)
     {
-        c.at (60000);
         auto& f = p.fill;
         for (int i = 0; i < kStepsPerBar; ++i) f[(size_t) i] = p.at (1, i);
         f.fill ({}); // start from the second motif bar's first half
@@ -600,7 +574,7 @@ namespace
         const int start = amt < 0.4f ? 12 : 8;
         for (int i = start; i < 16; ++i) f[(size_t) i] = Step();
 
-        const float r = c.rf();
+        const float r = c.rng.nextFloat();
         const float pStutter = 0.25f + 0.3f * c.s.stutter;
         const int type = r < 0.45f ? 0 : (r < 0.45f + pStutter ? 1 : 2);
         const bool ramp = c.s.pitchProb > 0.08f || c.chance (0.4f);
@@ -676,7 +650,6 @@ Pattern Generator::generate (const Kit& kit, const GenSettings& s, uint32_t seed
     // bars 3..8 : repetitions with variation, stronger at the end of each 4-bar phrase
     for (int b = 2; b < kMaxBars; ++b)
     {
-        c.at (70000 + b);
         for (int i = 0; i < kStepsPerBar; ++i) p.at (b, i) = p.at (b % 2, i);
         const bool phraseEnd = (b % 4) == 3;
         if (phraseEnd && c.chance (s.variation * 0.8f))
@@ -724,7 +697,7 @@ void Generator::mutate (Pattern& p, const Kit& kit, const GenSettings& s, uint32
     for (auto& st : p.fill)  if (st.slice >= n) st.slice = (int16_t) (n - 1);
 }
 
-Pattern Generator::remap (const Pattern& p, const Kit& oldKit, const Kit& newKit, int src)
+Pattern Generator::remap (const Pattern& p, const Kit& oldKit, const Kit& newKit)
 {
     Pattern out = p;
     if (newKit.slices.empty()) return out;
@@ -732,7 +705,7 @@ Pattern Generator::remap (const Pattern& p, const Kit& oldKit, const Kit& newKit
 
     auto mapStep = [&] (Step& st)
     {
-        if (! st.on || (src >= 0 && st.src != src)) return;
+        if (! st.on) return;
         double g = 0.0;
         if (st.slice >= 0 && st.slice < (int) oldKit.slices.size())
             g = oldKit.slices[(size_t) st.slice].gridPos * ratio;
@@ -751,119 +724,6 @@ Pattern Generator::remap (const Pattern& p, const Kit& oldKit, const Kit& newKit
     for (auto& st : out.steps) mapStep (st);
     for (auto& st : out.fill)  mapStep (st);
     return out;
-}
-
-namespace
-{
-    float hash01 (uint32_t seed, int i, int salt)
-    {
-        uint64_t z = ((uint64_t) seed << 32) ^ ((uint64_t) (i + 7919 * salt) * 0x9E3779B97F4A7C15ull);
-        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-        z ^= z >> 31;
-        return (float) ((z >> 40) & 0xFFFFFF) / 16777216.0f;
-    }
-
-    bool isBackbone (const Step& s) { return s.role == HitClass::Kick || s.role == HitClass::Snare; }
-
-    Step pickDuo (const Step& a, const Step& b, int inBar, int idx, int mode, float share, uint32_t seed)
-    {
-        Step A = a, B = b;
-        A.src = 0; B.src = 1;
-        if (a.locked) return A;
-        if (b.locked && ! a.on) return B;
-        const float u = hash01 (seed, idx, mode + 1);
-
-        switch (mode)
-        {
-            case DuoCallResponse:
-            {
-                const bool answer = inBar >= 8;
-                if (! answer)
-                {
-                    if (a.on) return A;
-                    return (b.on && u < share * 0.3f) ? B : Step();
-                }
-                if (b.on && u < 0.4f + 0.6f * share) return B;
-                return (a.on && u > share) ? A : Step();
-            }
-            case DuoSplitRoles:
-            {
-                if (a.on && isBackbone (a)) return A;
-                if (b.on && ! isBackbone (b)) return B;
-                if (b.on && a.on && u < 0.5f + 0.5f * share)
-                {
-                    // A's hat / ghost spot : B plays it, softer when it is one of B's kicks or snares
-                    B.vel = (uint8_t) juce::jmax (1, (int) B.vel * 7 / 10);
-                    return B;
-                }
-                if (b.on && ! a.on && u < share * 0.5f) return B;   // B's own kick / snare in a free step : rare accents
-                return (a.on && u > share * 0.8f) ? A : Step();
-            }
-            case DuoFillGaps:
-            default:
-            {
-                if (a.on)
-                {
-                    // A keeps its kicks and snares on the beats ; B may take over the rest
-                    const bool strong = isBackbone (a) && inBar % 4 == 0;
-                    if (! strong && b.on && u < share * (isBackbone (a) ? 0.6f : 0.9f)) return B;
-                    return A;
-                }
-                return (b.on && u < 0.35f + 0.65f * share) ? B : Step();
-            }
-        }
-    }
-}
-
-Pattern Generator::combine (const Pattern& a, const Pattern& b, int mode, float share, uint32_t seed)
-{
-    Pattern out;
-    out.seed = a.seed;
-    share = juce::jlimit (0.0f, 1.0f, share);
-    for (int i = 0; i < kMaxSteps; ++i)
-        out.steps[(size_t) i] = pickDuo (a.steps[(size_t) i], b.steps[(size_t) i], i % kStepsPerBar, i, mode, share, seed);
-    for (int i = 0; i < kStepsPerBar; ++i)
-        out.fill[(size_t) i] = pickDuo (a.fill[(size_t) i], b.fill[(size_t) i], i, 1000 + i, mode, share, seed);
-    for (auto& st : out.steps) if (! st.on) st = Step();
-    for (auto& st : out.fill)  if (! st.on) st = Step();
-    return out;
-}
-
-GenSettings Generator::settingsForB (const GenSettings& s, int mode, float share)
-{
-    auto b = s;
-    auto push = [] (float v, float amt) { return juce::jlimit (0.0f, 1.0f, v + (1.0f - v) * amt); };
-    const float amt = juce::jlimit (0.0f, 1.0f, share) * (mode == DuoCallResponse ? 0.2f : 0.45f);
-    b.density = push (s.density, amt);
-    b.ghosts  = push (s.ghosts, amt);
-    b.hats    = push (s.hats, amt);
-    return b;
-}
-
-void Generator::mutateDuo (Pattern& p, const Kit* kits[kNumBreaks], const GenSettings& s, uint32_t seed)
-{
-    // split by owner, mutate each part with its own break, then merge back keeping one hit per step
-    Pattern part[kNumBreaks];
-    for (int k = 0; k < kNumBreaks; ++k)
-    {
-        part[k] = p;
-        for (auto& st : part[k].steps) if (st.on && st.src != k) st = Step();
-        for (auto& st : part[k].fill)  if (st.on && st.src != k) st = Step();
-        if (kits[k] != nullptr && ! kits[k]->slices.empty())
-            mutate (part[k], *kits[k], s, seed + (uint32_t) k * 977u);
-        for (auto& st : part[k].steps) st.src = (uint8_t) k;
-        for (auto& st : part[k].fill)  st.src = (uint8_t) k;
-    }
-    auto merge = [&] (Step& dst, const Step& a, const Step& b)
-    {
-        const Step orig = dst;
-        if (orig.on) { dst = orig.src == 0 ? (a.on ? a : (b.on ? b : Step())) : (b.on ? b : (a.on ? a : Step())); }
-        else dst = a.on ? a : (b.on ? b : Step());
-        if (! dst.on) dst = Step();
-    };
-    for (int i = 0; i < kMaxSteps; ++i) merge (p.steps[(size_t) i], part[0].steps[(size_t) i], part[1].steps[(size_t) i]);
-    for (int i = 0; i < kStepsPerBar; ++i) merge (p.fill[(size_t) i], part[0].fill[(size_t) i], part[1].fill[(size_t) i]);
 }
 
 int Generator::naturalSliceForStep (const Kit& kit, int absoluteStep)

@@ -7,8 +7,6 @@
 #include "Core/Engine.h"
 #include "UI/UpdateCheck.h"
 #include <functional>
-#include <set>
-#include <array>
 #include <optional>
 
 namespace PID
@@ -43,9 +41,6 @@ namespace PID
     inline constexpr const char* quantize   = "quantize";
     inline constexpr const char* seqOn      = "seqOn";
     inline constexpr const char* syncOn     = "syncOn";
-    inline constexpr const char* bOn        = "bOn";
-    inline constexpr const char* duoMode    = "duoMode";
-    inline constexpr const char* bShare     = "bShare";
     inline constexpr const char* freeBpm    = "freeBpm";
     // playback
     inline constexpr const char* tempoMode  = "tempoMode";
@@ -92,7 +87,6 @@ namespace PID
 }
 
 //==============================================================================
-/** Kinetik Jungle (KJNG-2) : two breaks (A and B), one sequence where every step belongs to A or B. */
 class JSliceProcessor : public juce::AudioProcessor,
                         public juce::ChangeBroadcaster,
                         private juce::Timer,
@@ -112,7 +106,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "Kinetik Jungle"; }
+    const juce::String getName() const override { return "J-Slice"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
@@ -131,22 +125,22 @@ public:
     juce::AudioProcessorValueTreeState apvts;
     bc::Engine engine;
 
-    bc::Kit::Ptr getKit (int slot) const     { return breaks[(size_t) juce::jlimit (0, 1, slot)].kit; }
+    bc::Kit::Ptr getKit() const              { return kit; }
     const bc::Pattern& getPattern() const    { return pattern; }
-    const bc::SlicerSettings& getSlicerSettings (int slot) const { return breaks[(size_t) juce::jlimit (0, 1, slot)].slicer; }
+    const bc::SlicerSettings& getSlicerSettings() const { return slicerSettings; }
+    double getAnalysisConfidence() const     { return analysis.confidence; }
     bool canUndo() const                     { return ! undoStack.empty(); }
     bool canRedo() const                     { return ! redoStack.empty(); }
-    bool isBreakBActive() const              { return pv (PID::bOn) > 0.5f && breaks[1].kit != nullptr; }
 
-    bool loadFile (int slot, const juce::File& f, juce::String& error);
-    juce::File getCurrentFile (int slot) const;
-    juce::File getSiblingFile (int slot, int delta) const;
+    bool loadFile (const juce::File& f, juce::String& error);
+    juce::File getCurrentFile() const;
+    juce::File getSiblingFile (int delta) const;
     static juce::String getSupportedWildcard() { return "*.wav;*.wave;*.aif;*.aiff;*.aifc;*.flac;*.mp3;*.ogg"; }
 
-    void setSlicerSettings (int slot, const bc::SlicerSettings& s);
-    void setBreakTempo (int slot, double bpm, int bars, bool reslice);
-    void redetectTempo (int slot);
-    void updateSlices (int slot, std::vector<bc::Slice> slices, bool reclassify);
+    void setSlicerSettings (const bc::SlicerSettings& s);
+    void setBreakTempo (double bpm, int bars, bool reslice);
+    void redetectTempo();
+    void updateSlices (std::vector<bc::Slice> slices, bool reclassify);
 
     void setPattern (const bc::Pattern& p, bool undoable);
     void modifyStep (int index, const std::function<void (bc::Step&)>& fn, bool undoable = true);   // 0..127 bars, 128..143 fill
@@ -155,11 +149,10 @@ public:
     void undo();
     void redo();
     void clearLocks();
-    void clearStepFx (uint8_t mask);
+    void clearStepFx (uint8_t mask);   // removes these per-step effects from every step
     void requestFill()                { engine.requestFill(); }
-    void previewSlice (int slot, int i) { engine.previewSlice (slot, i); }
+    void previewSlice (int i)         { engine.previewSlice (i); }
     void applyStyle (int index);
-
 
     bc::GenSettings currentGenSettings() const;
     bc::EngineParams currentEngineParams() const;
@@ -201,41 +194,23 @@ public:
     void setKeepPatternOnLoad (bool b){ globalSettings->setValue ("keepPattern", b); globalSettings->saveIfNeeded(); }
 
 private:
-    struct Break
-    {
-        bc::Kit::Ptr kit;
-        bc::AnalysisResult analysis;
-        bc::SlicerSettings slicer;
-        bc::Kit::Ptr liveBaseKit;          // live re-slicing gesture base
-        bc::Pattern liveBasePattern;
-        juce::uint32 liveBaseTime = 0;
-    };
-
     void timerCallback() override;
     void parameterChanged (const juce::String& id, float value) override;
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     static bc::AudioData::Ptr readAudio (const juce::File& f, juce::String& error);
-    void setAudio (int slot, bc::AudioData::Ptr audio, bool keepPattern);
-    void rebuildSlices (int slot);
-    void setKit (int slot, bc::Kit::Ptr k);
-    bc::Pattern buildPattern (uint32_t seed) const;
-    void regenerateLive();
+    void setAudio (bc::AudioData::Ptr audio, bool keepPattern);
+    void rebuildSlices();
+    void pushKit();
     float pv (const char* id) const   { return apvts.getRawParameterValue (id)->load(); }
 
-    std::array<Break, bc::kNumBreaks> breaks;
-    bc::Pattern pattern;               // the slot being edited (= slots[editSlot].pattern)
+    bc::Kit::Ptr kit;
+    bc::AnalysisResult analysis;
+    bc::SlicerSettings slicerSettings;
+    bc::Pattern pattern;              // the slot being edited (= slots[editSlot].pattern)
     std::vector<bc::Pattern> undoStack, redoStack;
-    std::set<int> manualSteps;         // steps edited by hand since the last GENERATE (kept when macros move)
 
-    // pattern slots : each = steps + loop length + generator settings + the breaks it was made for
-    struct Slot
-    {
-        bc::Pattern pattern;
-        juce::NamedValueSet settings;
-        std::array<bc::Kit::Ptr, bc::kNumBreaks> madeFor;
-        std::set<int> manual;
-    };
+    struct Slot { bc::Pattern pattern; juce::NamedValueSet settings; bc::Kit::Ptr madeFor; };
     std::array<Slot, kSlots> slots;
     int editSlot = 0, playSlot = 0, queuedSlot = -1;
     std::unique_ptr<Slot> slotClip;
@@ -245,8 +220,7 @@ private:
     juce::int64 lastLoop = -1;
     void captureSettings (Slot& s) const;
     void applySettings (const Slot& s);
-    bc::Pattern remapToBreaks (bc::Pattern p, const std::array<bc::Kit::Ptr, bc::kNumBreaks>& madeFor) const;
-    bc::Pattern slotPattern (int i);  // slot pattern, remapped to the current breaks if needed
+    bc::Pattern slotPattern (int i);  // slot pattern, remapped to the current break if needed
     void queueSlot (int i);
     void updateSlots();               // timer: pattern changes, chain
     juce::CriticalSection stateLock;
@@ -256,12 +230,11 @@ private:
     double internalPpq = 0.0;
     bool internalRunning = false;
 
-    // live macros : any generator parameter change re-generates the pattern with the same seed
-    std::atomic<bool> regenPending { false };
-    std::atomic<juce::uint32> regenRequestTime { 0 };
-    juce::uint32 regenGestureTime = 0;
-    bool restoringState = false;
-
+    // live re-slicing : while settings keep changing, the pattern is remapped from the state
+    // captured at the start of the gesture (avoids drifting through many intermediate slicings)
+    bc::Kit::Ptr liveBaseKit;
+    bc::Pattern liveBasePattern;
+    juce::uint32 liveBaseTime = 0;
     std::atomic<int> genRequests { 0 }, mutRequests { 0 }, fillRequests { 0 };
     int lastMidiGen = 0, lastMidiMut = 0, lastMidiUndo = 0, lastMidiSeq = 0;
     std::shared_ptr<bool> alive = std::make_shared<bool> (true);

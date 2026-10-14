@@ -39,12 +39,11 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     reverb.reset();
 }
 
-void Engine::setKit (int slot, Kit::Ptr newKit)
+void Engine::setKit (Kit::Ptr newKit)
 {
-    slot = juce::jlimit (0, kNumBreaks - 1, slot);
     const juce::SpinLock::ScopedLockType sl (kitLock);
-    pendingKits[slot] = std::move (newKit);
-    kitPending[slot] = true;
+    pendingKit = std::move (newKit);
+    kitPending = true;
 }
 
 void Engine::setPattern (const Pattern& p, bool quantiseToBar)
@@ -104,23 +103,19 @@ void Engine::pushEvent (const Ev& e)
 
 void Engine::collectSeqEvents (double ppqStart, int startSample, int numSamples, double samplesPerPpq, const EngineParams& p)
 {
-    if (numSamples <= 0) return;
+    if (kit == nullptr || kit->slices.empty() || numSamples <= 0) return;
     const double ppqEnd = ppqStart + numSamples / samplesPerPpq;
     const int64_t kFirst = (int64_t) std::floor (ppqStart * 4.0) - 1;
     const int64_t kLast  = (int64_t) std::floor (ppqEnd * 4.0);
     const double samplesPerStep = samplesPerPpq / 4.0;
     const double swingOff = juce::jlimit (0.0f, 1.0f, p.swing) / 3.0;
+    const int nSlices = (int) kit->slices.size();
     const int len = loopLen (p);
 
     for (int64_t k = kFirst; k <= kLast; ++k)
     {
         auto* st = stepAt (k, p);
         if (st == nullptr || ! st->on) continue;
-        const int src = juce::jlimit (0, kNumBreaks - 1, (int) st->src);
-        if (src == 1 && ! p.bOn) continue;
-        const Kit* kt = kits[src].get();
-        if (kt == nullptr || kt->slices.empty()) continue;
-        const int nSlices = (int) kt->slices.size();
 
         const double off0 = (k % 2 == 1) ? swingOff : 0.0;
         const double off1 = ((k + 1) % 2 == 1) ? swingOff : 0.0;
@@ -149,7 +144,6 @@ void Engine::collectSeqEvents (double ppqStart, int startSample, int numSamples,
                 e.gateSamples = (int64_t) juce::jmax (32.0, distanceToNext (k, j, roll, p) * samplesPerStep);
             e.uiStep = ui;
             e.fx = st->fx;
-            e.src = src;
             pushEvent (e);
         }
     }
@@ -165,7 +159,6 @@ void Engine::releaseAll (float ms)
 
 void Engine::trigger (const Ev& e, const EngineParams& p, double hostBpm)
 {
-    const Kit* kit = kits[juce::jlimit (0, kNumBreaks - 1, e.src)].get();
     if (kit == nullptr || kit->audio == nullptr || e.slice < 0 || e.slice >= (int) kit->slices.size()) return;
     const auto& sl = kit->slices[(size_t) e.slice];
     const int64_t len = kit->length();
@@ -183,7 +176,6 @@ void Engine::trigger (const Ev& e, const EngineParams& p, double hostBpm)
     const int tail = p.poly ? 1 : p.tailMode;
     v->active = true;
     v->slice = e.slice;
-    v->src = juce::jlimit (0, kNumBreaks - 1, e.src);
     v->send = sl.cls == HitClass::Snare || sl.cls == HitClass::Ghost;
     v->fx = e.fx;
     v->lfPhase = 1.0f; v->lfL = v->lfR = 0.0f;
@@ -235,7 +227,7 @@ void Engine::trigger (const Ev& e, const EngineParams& p, double hostBpm)
     v->releaseDec = 1.0f / juce::jmax (1.0f, 0.003f * (float) sr);
     v->age = ++voiceCounter;
 
-    uiSlice[v->src].store (e.slice);
+    uiSlice.store (e.slice);
 }
 
 //==============================================================================
@@ -261,7 +253,11 @@ namespace
 
 void Engine::renderVoices (juce::AudioBuffer<float>& out, int start, int end)
 {
-    if (end <= start) return;
+    if (end <= start || kit == nullptr || kit->audio == nullptr) return;
+    const auto& buf = kit->audio->buffer;
+    const int64_t len = buf.getNumSamples();
+    const float* srcL = buf.getReadPointer (0);
+    const float* srcR = buf.getReadPointer (buf.getNumChannels() > 1 ? 1 : 0);
     float* oL = out.getWritePointer (0);
     float* oR = out.getWritePointer (out.getNumChannels() > 1 ? 1 : 0);
     float* dL = dlyBuf.getWritePointer (0);
@@ -280,12 +276,6 @@ void Engine::renderVoices (juce::AudioBuffer<float>& out, int start, int end)
     for (auto& v : voices)
     {
         if (! v.active) continue;
-        const Kit* kv = kits[v.src].get();
-        if (kv == nullptr || kv->audio == nullptr) { v.active = false; continue; }
-        const auto& buf = kv->audio->buffer;
-        const int64_t len = buf.getNumSamples();
-        const float* srcL = buf.getReadPointer (0);
-        const float* srcR = buf.getReadPointer (buf.getNumChannels() > 1 ? 1 : 0);
         for (int i = start; i < end; ++i)
         {
             float l = 0.0f, r = 0.0f;
@@ -586,15 +576,11 @@ void Engine::process (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, con
 
     {
         const juce::SpinLock::ScopedTryLockType tl (kitLock);
-        if (tl.isLocked())
+        if (tl.isLocked() && kitPending)
         {
-            for (int k = 0; k < kNumBreaks; ++k)
-            {
-                if (! kitPending[k]) continue;
-                std::swap (kits[k], pendingKits[k]);  // old kit is released later on the message thread
-                kitPending[k] = false;
-                for (auto& v : voices) if (v.src == k) v.active = false;
-            }
+            std::swap (kit, pendingKit);  // old kit is released later on the message thread
+            kitPending = false;
+            for (auto& v : voices) v.active = false;
         }
     }
 
@@ -638,26 +624,18 @@ void Engine::process (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, con
         else if (note == kNoteFill)      { if (t.playing) liveFillBar = (int64_t) std::floor (t.ppq / 4.0) + 1; }
         else if (note == kNoteUndo)      midiUndo.fetch_add (1);
         else if (note == kNoteSeqToggle) midiSeqToggle.fetch_add (1);
-        else
+        else if (note >= kFirstSliceNote && kit != nullptr && note - kFirstSliceNote < (int) kit->slices.size())
         {
-            // C1.. = slices of break A, C4.. = slices of break B
-            const int slot = note >= kFirstSliceNoteB ? 1 : 0;
-            const int idx = note - (slot == 1 ? kFirstSliceNoteB : kFirstSliceNote);
-            const Kit* kt = kits[slot].get();
-            if (idx >= 0 && kt != nullptr && idx < (int) kt->slices.size())
-            {
-                Ev e;
-                e.offset = juce::jlimit (0, n - 1, meta.samplePosition);
-                e.slice = idx;
-                e.src = slot;
-                e.vel = m.getFloatVelocity();
-                pushEvent (e);
-            }
+            Ev e;
+            e.offset = juce::jlimit (0, n - 1, meta.samplePosition);
+            e.slice = note - kFirstSliceNote;
+            e.vel = m.getFloatVelocity();
+            pushEvent (e);
         }
     }
 
     const int pv = previewRequest.exchange (-1);
-    if (pv >= 0) { Ev e; e.offset = 0; e.slice = pv % 1000; e.src = juce::jlimit (0, kNumBreaks - 1, pv / 1000); e.vel = 0.9f; pushEvent (e); }
+    if (pv >= 0) { Ev e; e.offset = 0; e.slice = pv; e.vel = 0.9f; pushEvent (e); }
 
     // ---- sequencer
     if (t.playing && p.seqOn && t.ppq >= 0.0)
@@ -719,12 +697,9 @@ void Engine::process (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi, con
     }
     renderVoices (out, cursor, n);
 
-    for (int k = 0; k < kNumBreaks; ++k)
-    {
-        const Voice* newest = nullptr;
-        for (auto& v : voices) if (v.active && v.src == k && (newest == nullptr || v.age > newest->age)) newest = &v;
-        uiSamplePos[k].store (newest != nullptr ? (newest->mode >= TempoCyclic ? newest->anchor : newest->pos) : -1.0);
-    }
+    const Voice* newest = nullptr;
+    for (auto& v : voices) if (v.active && (newest == nullptr || v.age > newest->age)) newest = &v;
+    uiSamplePos.store (newest != nullptr ? (newest->mode >= TempoCyclic ? newest->anchor : newest->pos) : -1.0);
 
     applyFx (out, p, bpm);
     cur = nullptr;

@@ -23,7 +23,6 @@ namespace ui
         juce::Colour active;    // knob being edited, record-like highlights
         juce::Colour hot;       // alerts, important toggles
         juce::Colour kick, snare, hat, ghost;
-        juce::Colour breakA, breakB;   // identity colours of the two breaks
     };
 
     int numSkins();
@@ -54,8 +53,6 @@ namespace ui
 
     /** Small 4-point star used next to the logo. */
     void drawStar (juce::Graphics& g, juce::Point<float> c, float r, juce::Colour col);
-
-    inline juce::Colour breakColour (int slot) { return slot == 1 ? pal().breakB : pal().breakA; }
 
     //==============================================================================
     class LookAndFeel : public juce::LookAndFeel_V4

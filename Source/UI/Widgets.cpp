@@ -17,38 +17,34 @@ Knob::Knob (juce::AudioProcessorValueTreeState& s, const juce::String& paramId, 
     if (param != nullptr)
         slider.setDoubleClickReturnValue (true, (double) param->convertFrom0to1 (param->getDefaultValue()));
     slider.addListener (this);
-    slider.addMouseListener (this, false);
     slider.setPopupDisplayEnabled (false, false, nullptr);
 }
 
-Knob::~Knob() { slider.removeMouseListener (this); slider.removeListener (this); }
+Knob::~Knob() { slider.removeListener (this); }
 
 void Knob::resized()
 {
     auto r = getLocalBounds();
-    r.removeFromBottom (20);
-    const int sz = juce::jmin (r.getWidth(), r.getHeight());
-    slider.setBounds (r.withSizeKeepingCentre (sz, sz));
+    r.removeFromBottom (46);
+    const int s = juce::jmin (r.getWidth(), r.getHeight());
+    slider.setBounds (r.withSizeKeepingCentre (s, s));
 }
 
-void Knob::paint (juce::Graphics&) {}
-
-void Knob::paintOverChildren (juce::Graphics& g)
+void Knob::paint (juce::Graphics& g)
 {
-    // the value in the centre of the disc, the caption under the knob
-    const bool hot = slider.isMouseOverOrDragging() || slider.isMouseButtonDown();
-    auto sb = slider.getBounds().toFloat();
-    const float d = juce::jmin (sb.getWidth(), sb.getHeight());
+    auto r = getLocalBounds();
+    auto text = r.removeFromBottom (46);
+    const bool hot = slider.isMouseOverOrDragging();
+    g.setFont (mono (11.5f));
+    g.setColour (hot ? pal().active : pal().text);
+    g.drawText (caption, text.removeFromTop (17), juce::Justification::centred);
+
     juce::String v;
     if (format) v = format (slider.getValue());
     else if (param != nullptr) v = param->getCurrentValueAsText();
-    g.setFont (serif (juce::jlimit (13.0f, 30.0f, d * 0.34f)));
-    g.setColour (hot ? pal().hot : pal().text);
-    g.drawFittedText (v, sb.withSizeKeepingCentre (d * 0.62f, d * 0.5f).toNearestInt(), juce::Justification::centred, 1, 0.6f);
-
-    g.setFont (mono (11.0f));
-    g.setColour (hot ? pal().hot : pal().dim);
-    g.drawText (caption, getLocalBounds().removeFromBottom (18), juce::Justification::centred);
+    g.setFont (serif (24.0f));
+    g.setColour (hot ? pal().active : pal().text);
+    g.drawText (v, text, juce::Justification::centredTop);
 }
 
 //==============================================================================
@@ -183,239 +179,6 @@ void ValueBox::mouseDoubleClick (const juce::MouseEvent&)
     editor->onReturnKey = commit;
     editor->onFocusLost = commit;
     editor->onEscapeKey = [this] { juce::MessageManager::callAsync ([safe = SafePointer<ValueBox> (this)] { if (safe != nullptr) safe->editor.reset(); }); };
-}
-
-//==============================================================================
-HBar::HBar (const juce::String& c) : caption (c.toUpperCase())
-{
-    setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
-}
-
-juce::Rectangle<float> HBar::barArea() const
-{
-    auto r = getLocalBounds().toFloat();
-    r.removeFromLeft (caption.isNotEmpty() ? 96.0f : 0.0f);
-    r.removeFromRight (58.0f);
-    return r.withSizeKeepingCentre (r.getWidth(), 12.0f);
-}
-
-void HBar::paint (juce::Graphics& g)
-{
-    const bool en = isEnabled();
-    const double v = get ? juce::jlimit (0.0, 1.0, get()) : 0.0;
-    auto r = getLocalBounds();
-    g.setFont (mono (11.0f));
-    g.setColour (pal().dim.withMultipliedAlpha (en ? 1.0f : 0.5f));
-    if (caption.isNotEmpty()) g.drawText (caption, r.removeFromLeft (96), juce::Justification::centredLeft);
-    g.setFont (serif (24.0f));
-    g.setColour ((dragging ? pal().hot : pal().text).withMultipliedAlpha (en ? 1.0f : 0.4f));
-    g.drawText (format ? format (v) : juce::String (juce::roundToInt (v * 100.0)), r.removeFromRight (54), juce::Justification::centredRight);
-
-    auto b = barArea();
-    g.setColour (pal().inset);
-    g.fillRoundedRectangle (b, 6.0f);
-    g.setColour (pal().line);
-    g.drawRoundedRectangle (b.reduced (0.5f), 6.0f, 1.0f);
-    if (en)
-    {
-        auto fillR = b.reduced (2.0f);
-        fillR.setWidth (juce::jmax (fillR.getHeight(), fillR.getWidth() * (float) v));
-        g.setColour (dragging ? pal().hot : (colour.isTransparent() ? pal().accent : colour));
-        g.fillRoundedRectangle (fillR, 4.0f);
-    }
-}
-
-void HBar::setFromX (float x)
-{
-    auto b = barArea();
-    const double v = juce::jlimit (0.0, 1.0, (double) ((x - b.getX()) / juce::jmax (1.0f, b.getWidth())));
-    if (set) set (v, first);
-    first = false;
-    repaint();
-}
-
-void HBar::mouseDown (const juce::MouseEvent& e)
-{
-    if (! isEnabled()) return;
-    first = true;
-    dragging = true;
-    setFromX (e.position.x);
-}
-
-void HBar::mouseDrag (const juce::MouseEvent& e)
-{
-    if (dragging) setFromX (e.position.x);
-}
-
-void HBar::mouseUp (const juce::MouseEvent&)
-{
-    dragging = false;
-    if (onRelease) onRelease();
-    repaint();
-}
-
-void HBar::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w)
-{
-    if (! isEnabled() || ! get || ! set) return;
-    const double dir = (w.deltaY + w.deltaX) > 0.0f ? 1.0 : -1.0;
-    set (juce::jlimit (0.0, 1.0, get() + dir * 0.05), true);
-    repaint();
-}
-
-//==============================================================================
-ZoneFader::ZoneFader (juce::AudioProcessorValueTreeState& s, const juce::String& paramId, const juce::String& c, juce::StringArray z)
-    : caption (c.toUpperCase()), zones (std::move (z))
-{
-    param = s.getParameter (paramId);
-    if (param != nullptr) param->addListener (this);
-    setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
-}
-
-ZoneFader::~ZoneFader()
-{
-    if (param != nullptr) param->removeListener (this);
-}
-
-juce::Rectangle<float> ZoneFader::track() const
-{
-    return { 9.0f, 25.0f, (float) getWidth() - 18.0f, 12.0f };
-}
-
-float ZoneFader::valueForX (float x, bool detent) const
-{
-    auto t = track();
-    float v = juce::jlimit (0.0f, 1.0f, (x - t.getX()) / juce::jmax (1.0f, t.getWidth()));
-    if (detent && zones.size() > 1)
-    {
-        // gentle magnet on the zone centres : easy to land exactly on a named setting
-        const float stepV = 1.0f / (float) (zones.size() - 1);
-        const float nearest = std::round (v / stepV) * stepV;
-        if (std::abs (v - nearest) < 0.025f) v = nearest;
-    }
-    return v;
-}
-
-void ZoneFader::setValue (float v)
-{
-    if (param != nullptr) param->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v));
-    repaint();
-}
-
-void ZoneFader::paint (juce::Graphics& g)
-{
-    using namespace juce;
-    const auto& p = pal();
-    const float v = param != nullptr ? param->getValue() : 0.0f;
-    const bool hot = dragging || isMouseOver();
-    const int n = zones.size();
-    const int zone = n > 1 ? jlimit (0, n - 1, roundToInt (v * (float) (n - 1))) : 0;
-
-    g.setFont (mono (12.0f, true, 0.16f));
-    g.setColour (p.text);
-    g.drawText (caption, 2, 0, getWidth() / 2, 20, Justification::centredLeft);
-    g.setFont (serif (24.0f));
-    g.setColour (dragging ? p.hot : p.text);
-    const int shown = roundToInt ((v - 0.5f) * 200.0f);   // centre = the style as is
-    g.drawText ((shown > 0 ? "+" : "") + String (shown), getWidth() / 2, -2, getWidth() / 2 - 2, 24, Justification::centredRight);
-
-    auto t = track();
-    g.setColour (p.inset);
-    g.fillRoundedRectangle (t, 6.0f);
-    g.setColour (p.line);
-    g.drawRoundedRectangle (t.reduced (0.5f), 6.0f, 1.0f);
-    // zone ticks (the centre one is drawn brighter, with the fill)
-    for (int i = 1; i < n - 1; ++i)
-    {
-        const float x = t.getX() + t.getWidth() * (float) i / (float) (n - 1);
-        g.setColour (p.faint);
-        g.fillRect (x - 0.5f, t.getY() + 3.0f, 1.0f, t.getHeight() - 6.0f);
-    }
-    // filled from the centre (the style as is) towards the thumb
-    {
-        auto inner = t.reduced (2.0f);
-        const float cx = inner.getX() + inner.getWidth() * 0.5f, vx = inner.getX() + inner.getWidth() * v;
-        g.setColour (dragging ? p.hot : p.accent);
-        g.fillRoundedRectangle (Rectangle<float> (jmin (cx, vx), inner.getY(), jmax (2.0f, std::abs (vx - cx)), inner.getHeight()), 3.0f);
-        g.setColour (p.dim);
-        g.fillRect (t.getCentreX() - 0.75f, t.getY() - 3.0f, 1.5f, t.getHeight() + 6.0f);
-    }
-
-    // thumb
-    const float tx = t.getX() + t.getWidth() * v;
-    auto thumb = Rectangle<float> (18.0f, 18.0f).withCentre ({ jlimit (t.getX() + 6.0f, t.getRight() - 6.0f, tx), t.getCentreY() });
-    g.setColour (hot ? p.hot : p.text);
-    g.fillEllipse (thumb);
-    g.setColour (p.bg);
-    g.drawEllipse (thumb.reduced (1.0f), 2.0f);
-
-    // zone names : the current one is lit
-    g.setFont (mono (10.5f, true, 0.0f));
-    for (int i = 0; i < n; ++i)
-    {
-        const float cx = t.getX() + t.getWidth() * (float) i / (float) jmax (1, n - 1);
-        Rectangle<float> lr (70.0f, 16.0f);
-        lr = lr.withCentre ({ cx, t.getBottom() + 12.0f });
-        if (i == 0) lr.setX (t.getX() - 2.0f);
-        if (i == n - 1) lr.setRight (t.getRight() + 2.0f);
-        const auto just = i == 0 ? Justification::centredLeft : (i == n - 1 ? Justification::centredRight : Justification::centred);
-        g.setColour (i == zone ? p.text : p.dim.withAlpha (0.8f));
-        g.drawText (zones[i], lr.toNearestInt(), just);
-    }
-}
-
-void ZoneFader::mouseDown (const juce::MouseEvent& e)
-{
-    if (param == nullptr) return;
-    auto t = track();
-    if (e.position.y > t.getBottom() + 3.0f && zones.size() > 1)
-    {
-        // click on a zone name : jump to it
-        const float v = valueForX (e.position.x, false);
-        const float stepV = 1.0f / (float) (zones.size() - 1);
-        param->beginChangeGesture();
-        setValue (std::round (v / stepV) * stepV);
-        param->endChangeGesture();
-        return;
-    }
-    dragging = true;
-    dragStartV = param->getValue();
-    param->beginChangeGesture();
-    // click on the track jumps, click on the thumb only grabs
-    const float tx = t.getX() + t.getWidth() * dragStartV;
-    if (std::abs (e.position.x - tx) > 10.0f) { setValue (valueForX (e.position.x, true)); dragStartV = param->getValue(); }
-}
-
-void ZoneFader::mouseDrag (const juce::MouseEvent& e)
-{
-    if (! dragging) return;
-    const float speed = e.mods.isShiftDown() ? 0.2f : 1.0f;
-    const float dv = (float) e.getDistanceFromDragStartX() / juce::jmax (1.0f, track().getWidth()) * speed;
-    auto t = track();
-    setValue (valueForX (t.getX() + t.getWidth() * (dragStartV + dv), ! e.mods.isShiftDown()));
-}
-
-void ZoneFader::mouseUp (const juce::MouseEvent&)
-{
-    if (dragging && param != nullptr) param->endChangeGesture();
-    dragging = false;
-    repaint();
-}
-
-void ZoneFader::mouseDoubleClick (const juce::MouseEvent&)
-{
-    if (param == nullptr) return;
-    param->beginChangeGesture();
-    setValue (param->getDefaultValue());
-    param->endChangeGesture();
-}
-
-void ZoneFader::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w)
-{
-    if (param == nullptr) return;
-    const float dir = (w.deltaY + w.deltaX) > 0.0f ? 1.0f : -1.0f;
-    param->beginChangeGesture();
-    setValue (param->getValue() + dir * 0.02f);
-    param->endChangeGesture();
 }
 
 //==============================================================================

@@ -32,8 +32,6 @@ constexpr int kMaxSteps      = kStepsPerBar * kMaxBars;
 constexpr int kFirstSliceNote = 36;         // C1 = slice 1 (same as Ableton Simpler slice mode)
 constexpr int kMaxSlices     = 64;
 constexpr int kMaxRoll       = 8;           // re-triggers inside one step (8 = 1/128 at 16 steps per bar)
-constexpr int kNumBreaks     = 2;           // break A and break B
-constexpr int kFirstSliceNoteB = 72;        // C4 = slice 1 of break B
 
 // MIDI notes used as remote controls (below the slice range)
 constexpr int kNoteGenerate  = 24;          // C0
@@ -79,7 +77,6 @@ struct Step
     bool     locked   = false;
     HitClass role     = HitClass::Kick;
     uint8_t  fx       = 0;      // StepFx bit mask
-    uint8_t  src      = 0;      // which break plays this step : 0 = A, 1 = B (one hit per step, so the breaks never overlap)
 
     bool operator== (const Step&) const = default;
 };
@@ -104,7 +101,7 @@ struct Pattern
         {
             out << (s.on ? 1 : 0) << "," << s.slice << "," << (int) s.vel << "," << (s.reverse ? 1 : 0) << ","
                 << (int) s.pitch << "," << (int) s.roll << "," << juce::String ((double) s.gate, 9) << ","
-                << (s.locked ? 1 : 0) << "," << (int) s.role << "," << (int) s.fx << "," << (int) s.src << ";";
+                << (s.locked ? 1 : 0) << "," << (int) s.role << "," << (int) s.fx << ";";
         };
         for (auto& s : steps) writeStep (s);
         out << "|";
@@ -138,7 +135,6 @@ struct Pattern
                 st.locked  = f[7].getIntValue() != 0;
                 st.role    = (HitClass) juce::jlimit (0, kNumClasses - 1, f[8].getIntValue());
                 st.fx      = f.size() > 9 ? (uint8_t) (f[9].getIntValue() & 0x0f) : (uint8_t) 0;
-                st.src     = f.size() > 10 ? (uint8_t) juce::jlimit (0, 1, f[10].getIntValue()) : (uint8_t) 0;
                 dest[i] = st;
             }
         };
