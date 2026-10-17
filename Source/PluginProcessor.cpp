@@ -904,11 +904,14 @@ void JSliceProcessor::setStateInformation (const void* data, int sizeInBytes)
             {
                 juce::FlacAudioFormat flac;
                 std::unique_ptr<juce::AudioFormatReader> r (flac.createReaderFor (new juce::MemoryInputStream (*mb, false), true));
-                if (r != nullptr)
+                if (r != nullptr && r->sampleRate >= 8000.0 && r->sampleRate <= 384000.0 && r->lengthInSamples > 0)
                 {
+                    // same 60 s limit as a loaded file (a damaged or hostile project cannot ask for gigabytes)
+                    const int n = (int) juce::jmin (r->lengthInSamples, (juce::int64) (r->sampleRate * 60.0));
                     audio = new AudioData();
-                    audio->buffer.setSize (2, (int) r->lengthInSamples);
-                    r->read (&audio->buffer, 0, (int) r->lengthInSamples, 0, true, true);
+                    audio->buffer.setSize (2, n);
+                    audio->buffer.clear();
+                    r->read (&audio->buffer, 0, n, 0, true, true);
                     audio->sampleRate = r->sampleRate;
                     audio->file = f;
                     audio->name = st.getProperty ("name").toString();
@@ -924,6 +927,10 @@ void JSliceProcessor::setStateInformation (const void* data, int sizeInBytes)
             k->bpm = st.getProperty ("bpm", analysis.bpm);
             k->bars = st.getProperty ("bars", analysis.bars);
             k->gridOrigin = (int64_t) (juce::int64) st.getProperty ("origin", (juce::int64) analysis.gridOrigin);
+            // values from the project file: keep them in a sane range
+            if (! (k->bpm >= 40.0 && k->bpm <= 400.0)) k->bpm = analysis.bpm;
+            k->bars = juce::jlimit (1, 64, (int) k->bars);
+            k->gridOrigin = juce::jlimit ((int64_t) 0, (int64_t) audio->buffer.getNumSamples() - 1, k->gridOrigin);
 
             std::vector<Slice> slices;
             auto sls = st.getChildWithName ("SLICES");

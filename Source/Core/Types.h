@@ -131,7 +131,8 @@ struct Pattern
                 st.reverse = f[3].getIntValue() != 0;
                 st.pitch   = (int8_t) juce::jlimit (-24, 24, f[4].getIntValue());
                 st.roll    = (uint8_t) juce::jlimit (1, kMaxRoll, f[5].getIntValue());
-                st.gate    = juce::jlimit (0.05f, 1.0f, f[6].getFloatValue());
+                const float g = f[6].getFloatValue();
+                st.gate    = std::isfinite (g) ? juce::jlimit (0.05f, 1.0f, g) : 1.0f;   // "nan" in a damaged project
                 st.locked  = f[7].getIntValue() != 0;
                 st.role    = (HitClass) juce::jlimit (0, kNumClasses - 1, f[8].getIntValue());
                 st.fx      = f.size() > 9 ? (uint8_t) (f[9].getIntValue() & 0x0f) : (uint8_t) 0;

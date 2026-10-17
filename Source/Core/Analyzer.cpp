@@ -517,7 +517,9 @@ std::vector<Slice> Analyzer::makeSlices (const AnalysisResult& an, const juce::A
 void Analyzer::finaliseSlices (std::vector<Slice>& slices, int64_t numSamples, double sr, double bpm, int64_t origin)
 {
     std::sort (slices.begin(), slices.end(), [] (auto& a, auto& b) { return a.start < b.start; });
-    slices.erase (std::remove_if (slices.begin(), slices.end(), [numSamples] (auto& s) { return s.start >= numSamples - 16; }), slices.end());
+    // starts outside the audio (damaged project, or a shorter file than the one saved) are dropped
+    slices.erase (std::remove_if (slices.begin(), slices.end(), [numSamples] (auto& s) { return s.start < 0 || s.start >= numSamples - 16; }), slices.end());
+    if (! (bpm > 1.0)) bpm = 120.0;
     const double sps = sr * 60.0 / bpm / 4.0;
     for (size_t i = 0; i < slices.size(); ++i)
     {

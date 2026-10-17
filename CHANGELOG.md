@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.2
+
+- Safer project loading: slices outside the audio, an invalid tempo or bar count, an oversized embedded break or a
+  "nan" gate in a damaged project are corrected instead of reading outside the audio (possible crash)
+
 ## 1.3.1
 
 - NEON skin: the pink highlights are red
