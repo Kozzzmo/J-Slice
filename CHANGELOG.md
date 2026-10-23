@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1
+
+- Larger, bolder text: every label in IBM Plex Mono SemiBold, 8 % larger; small values 15 % larger.
+
 ## 1.4.0
 
 - **J-Slice is now KJNG-2** (Kinetik Jungle): new name in the window and in the music software. Projects made with

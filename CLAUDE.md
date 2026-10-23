@@ -49,3 +49,5 @@ licence (free "Starter" tier up to USD 20k revenue a year).
 - RESET (`resetKeepBreak`, button left of SKIN, confirmation dialog): parameters to default (not the trigger
   parameters), slots / chain / clipboard emptied, edit slot = A01, empty pattern via `setPattern(p, true)` (undoable);
   the kit (break, tempo, bars, slices) and the slicer settings are kept.
+
+- Text (1.4.1): `ui::mono()` always SemiBold and x1.08, `ui::serif()` x1.15 up to 22 px (same choice as the plug-ins).

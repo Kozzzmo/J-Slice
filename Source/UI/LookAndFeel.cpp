@@ -109,12 +109,14 @@ int skinIndex()           { return currentSkin; }
 void setSkin (int index)  { currentSkin = juce::jlimit (0, numSkins() - 1, index); }
 const Palette& pal()      { return skins()[(size_t) currentSkin]; }
 
-juce::Font serif (float h)        { return juce::Font (juce::FontOptions (fonts().serif).withHeight (h)); }
+// 1.4.0: labels 8 % larger and always SemiBold, small values 15 % larger (same choice as the other Kinetik products)
+juce::Font serif (float h)        { return juce::Font (juce::FontOptions (fonts().serif).withHeight (h <= 22.0f ? h * 1.15f : h)); }
 juce::Font serifItalic (float h)  { return juce::Font (juce::FontOptions (fonts().serifItalic).withHeight (h)); }
 juce::Font logoFont (float h)     { return juce::Font (juce::FontOptions (fonts().logo).withHeight (h)); }
 juce::Font mono (float h, bool bold, float tracking)
 {
-    return juce::Font (juce::FontOptions (bold ? fonts().monoBold : fonts().monoMedium).withHeight (h).withKerningFactor (tracking));
+    juce::ignoreUnused (bold);
+    return juce::Font (juce::FontOptions (fonts().monoBold).withHeight (h * 1.08f).withKerningFactor (tracking));
 }
 
 void drawPanel (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& title)
