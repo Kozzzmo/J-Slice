@@ -612,6 +612,28 @@ void JSliceProcessor::clearSlot()
     setPattern (p, true);
 }
 
+void JSliceProcessor::resetKeepBreak()
+{
+    // parameters back to their defaults (not the trigger buttons, which would start a generation)
+    for (auto* prm : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
+        {
+            const auto id = rp->getParameterID();
+            if (id == PID::genTrig || id == PID::mutTrig || id == PID::fillTrig) continue;
+            rp->setValueNotifyingHost (rp->getDefaultValue());
+        }
+    // patterns, slots and chain emptied; the loaded break, its tempo / bars, slices and slicer settings are kept
+    chainOn = false; chain.clear(); chainPos = 0; chainReps = 0; lastLoop = -1;
+    queuedSlot = -1; engine.cancelQueue();
+    for (auto& sl : slots) sl = Slot();
+    slotClip.reset();
+    editSlot = 0; playSlot = 0;
+    Pattern p;
+    p.seed = 1;
+    setPattern (p, true);   // UNDO brings the edited pattern back
+    sendChangeMessage();
+}
+
 void JSliceProcessor::setChain (std::vector<ChainItem> c)
 {
     for (auto& it : c) { it.slot = juce::jlimit (0, kSlots - 1, it.slot); it.repeats = juce::jlimit (1, 16, it.repeats); }
@@ -762,10 +784,10 @@ void JSliceProcessor::applyStyle (int index)
 //==============================================================================
 juce::File JSliceProcessor::exportMidi()
 {
-    auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("J-Slice");
+    auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("KJNG-2");
     dir.createDirectory();
     const auto ep = currentEngineParams();
-    const auto name = juce::String ("J-Slice ") + juce::String ((int) std::round (lastBpm.load())) + "bpm " + juce::String ((int) pattern.seed);
+    const auto name = juce::String ("KJNG-2 ") + juce::String ((int) std::round (lastBpm.load())) + "bpm " + juce::String ((int) pattern.seed);
     auto f = dir.getChildFile (juce::File::createLegalFileName (name) + ".mid");
     Exporter::writeMidi (pattern, ep, Exporter::exportBars (ep), lastBpm.load(), f);
     return f;
@@ -774,10 +796,10 @@ juce::File JSliceProcessor::exportMidi()
 juce::File JSliceProcessor::exportAudio()
 {
     if (kit == nullptr) return {};
-    auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("J-Slice");
+    auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("KJNG-2");
     dir.createDirectory();
     const auto ep = currentEngineParams();
-    const auto name = juce::String ("J-Slice ") + (kit->audio != nullptr ? kit->audio->name : juce::String())
+    const auto name = juce::String ("KJNG-2 ") + (kit->audio != nullptr ? kit->audio->name : juce::String())
                       + " " + juce::String ((int) std::round (lastBpm.load())) + "bpm " + juce::String ((int) pattern.seed);
     auto f = dir.getChildFile (juce::File::createLegalFileName (name) + ".wav");
     const double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;

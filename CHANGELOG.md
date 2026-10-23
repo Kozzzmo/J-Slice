@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0
+
+- **J-Slice is now KJNG-2** (Kinetik Jungle): new name in the window and in the music software. Projects made with
+  J-Slice open unchanged (same plug-in identity); the plug-in files keep their name so an update replaces them.
+- **RESET** button (next to SKIN): every setting, the 16 pattern slots and the chain go back to default; the loaded
+  break and its slices stay. UNDO brings the edited pattern back.
+
 ## 1.3.3
 
 - New Kinetik logo: the "Orbit" mark, in every skin, with a larger product name

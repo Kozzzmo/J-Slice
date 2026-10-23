@@ -75,7 +75,7 @@ private:
     WaveformView wave;
     juce::ComboBox sliceMode, gridDiv;
     ui::ValueBox sensBox { "Sensitivity" }, prerollBox { "Pre-roll" }, breakBpmBox { "Break BPM" }, breakBarsBox { "Bars" };
-    juce::TextButton halfBtn { "/2" }, dblBtn { "x2" }, detectBtn { "Auto" };
+    juce::TextButton halfBtn { "/2" }, dblBtn { "x2" }, detectBtn { "Auto" }, resetBtn { "Reset" };
     juce::ToggleButton keepPattern { "Keep groove on load" };
 
     // sequencer

@@ -39,3 +39,13 @@ licence (free "Starter" tier up to USD 20k revenue a year).
 
 - Logo (1.3.3): the Kinetik "Orbit" mark (`ui::drawOrbitMark`, colours = `Palette::markBadge/markInk/markSat`) + the
   product name in Unbounded Bold (`ui::logoFont`, `Resources/Fonts/Unbounded-Bold.ttf`, ASCII subset, OFL). The star is no longer used.
+
+## KJNG-2 rename (1.4.0)
+
+- User-visible name = **KJNG-2** (`PLUGIN_NAME` in CMake = host name, `getName()`, logo, tooltips, dialogs, exported file
+  names). Kept on purpose so projects, settings and updates keep working: `PRODUCT_NAME "J-Slice"` (file names
+  J-Slice.vst3 / .component / standalone), `PLUGIN_CODE JSlc`, `BUNDLE_ID`, the settings folder "J-Slice", the update
+  manifest product "J-Slice" and the repository URLs. Note: the 2.0 work on branch `kjng-2` used the same name.
+- RESET (`resetKeepBreak`, button left of SKIN, confirmation dialog): parameters to default (not the trigger
+  parameters), slots / chain / clipboard emptied, edit slot = A01, empty pattern via `setPattern(p, true)` (undoable);
+  the kit (break, tempo, bars, slices) and the slicer settings are kept.

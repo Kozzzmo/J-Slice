@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(J_SLICE VERSION 1.3.3 LANGUAGES C CXX)
+project(J_SLICE VERSION 1.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -49,7 +49,8 @@ endif()
 
 if(JSLICE_BUILD_PLUGIN)
 juce_add_plugin(JSlice
-    PRODUCT_NAME "J-Slice"
+    PRODUCT_NAME "J-Slice"            # file names (J-Slice.vst3 / .component / .exe): kept so updates replace the old files
+    PLUGIN_NAME "KJNG-2"              # name shown in hosts (ex J-Slice); PLUGIN_CODE / BUNDLE_ID unchanged so projects reload
     COMPANY_NAME "Kozzzmo"
     BUNDLE_ID "com.kozzzmo.jslice"
     PLUGIN_MANUFACTURER_CODE Kozz

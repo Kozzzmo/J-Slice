@@ -89,11 +89,11 @@ JSliceEditor::JSliceEditor (JSliceProcessor& p)
         }
         else browser.reset();
     };
-    playBtn.setTooltip ("Play / stop J-Slice on its own (the DAW transport also starts it)");
+    playBtn.setTooltip ("Play / stop KJNG-2 on its own (the DAW transport also starts it)");
     playBtn.onClick = [this] { proc.internalPlay.store (! proc.internalPlay.load()); };
 
-    syncBtn.setTooltip ("SYNC on : J-Slice follows the DAW tempo and bar position, the break is fitted to the project tempo.\n"
-                        "SYNC off : J-Slice runs at its own BPM (set it in the BPM box).");
+    syncBtn.setTooltip ("SYNC on : KJNG-2 follows the DAW tempo and bar position, the break is fitted to the project tempo.\n"
+                        "SYNC off : KJNG-2 runs at its own BPM (set it in the BPM box).");
     addAndMakeVisible (syncBtn);
     bpmBox.get = [this] { return proc.getLastBpm(); };
     bpmBox.set = [this] (double v)
@@ -104,7 +104,7 @@ JSliceEditor::JSliceEditor (JSliceProcessor& p)
     bpmBox.format = [] (double v) { return String (v, 1); };
     bpmBox.minValue = 60.0; bpmBox.maxValue = 220.0; bpmBox.interval = 0.1; bpmBox.pixelsForFullRange = 600.0;
     bpmBox.showBar = false;
-    bpmBox.setTooltip ("Tempo used by J-Slice. With SYNC on it shows the DAW tempo ; dragging it switches to FREE tempo.");
+    bpmBox.setTooltip ("Tempo used by KJNG-2. With SYNC on it shows the DAW tempo ; dragging it switches to FREE tempo.");
     addAndMakeVisible (bpmBox);
 
     // ---------------------------------------------------------------- break display + slicer
@@ -194,6 +194,22 @@ JSliceEditor::JSliceEditor (JSliceProcessor& p)
     undoBtn.onClick = [this] { proc.undo(); };
     redoBtn.onClick = [this] { proc.redo(); };
     clearLocksBtn.onClick = [this] { proc.clearLocks(); };
+    addAndMakeVisible (resetBtn);
+    resetBtn.setTooltip ("Reset: every setting, pattern slot and the chain back to default. The loaded break and its slices stay.");
+    resetBtn.onClick = [this]
+    {
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                          .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                          .withTitle ("Reset KJNG-2?")
+                                          .withMessage ("Every setting, the 16 pattern slots and the chain go back to default.\nThe loaded break and its slices are kept.")
+                                          .withButton ("Reset")
+                                          .withButton ("Cancel")
+                                          .withAssociatedComponent (this),
+                                      [safe = juce::Component::SafePointer<JSliceEditor> (this)] (int r)
+                                      {
+                                          if (r == 1 && safe != nullptr) { safe->proc.resetKeepBreak(); safe->repaint(); }
+                                      });
+    };
 
     seedEdit.setFont (serif (21.0f));
     seedEdit.setInputRestrictions (9, "0123456789");
@@ -406,7 +422,7 @@ void JSliceEditor::paint (juce::Graphics& g)
     drawOrbitMark (g, { 14.0f, 8.0f, 46.0f, 46.0f });
     g.setFont (logoFont (30.0f));
     g.setColour (pl.text);
-    g.drawText ("J-SLICE", 68, 6, 240, 34, Justification::centredLeft);
+    g.drawText ("KJNG-2", 68, 6, 240, 34, Justification::centredLeft);
     g.setFont (mono (9.5f, true, 0.02f));
     if (proc.updates().getState() == upd::Checker::available)
     {
@@ -504,6 +520,7 @@ void JSliceEditor::resized()
     tabColour.setBounds (224, 712, 88, 26);
     tabSpace.setBounds (316, 712, 80, 26);
     skinBtn.setBounds (kW - 16 - 150, 712, 150, 26);
+    resetBtn.setBounds (kW - 16 - 150 - 8 - 90, 712, 90, 26);
     const Rectangle<int> pageR (16, 744, kW - 32, 150);
     for (auto* p : { &pageGen, &pagePlay, &pageColour, &pageSpace }) p->setBounds (pageR);
 
@@ -663,7 +680,7 @@ void JSliceEditor::showUpdateDialog()
         msg << "You have version " << cur << ". Download the new version from its release page and install it like "
                "the first time (close your DAW first).";
         AlertWindow::showAsync (MessageBoxOptions().withIconType (MessageBoxIconType::InfoIcon)
-                                    .withTitle ("J-Slice " + String (m.version) + " is available")
+                                    .withTitle ("KJNG-2 " + String (m.version) + " is available")
                                     .withMessage (msg)
                                     .withButton ("Open download page").withButton ("Skip this version").withButton ("Later")
                                     .withAssociatedComponent (this),
@@ -687,7 +704,7 @@ void JSliceEditor::showUpdateDialog()
     }
     msg << "\n\nAutomatic check (once a day, nothing is sent): " << (u.autoCheck() ? "ON" : "OFF");
     AlertWindow::showAsync (MessageBoxOptions().withIconType (MessageBoxIconType::NoIcon)
-                                .withTitle ("J-Slice updates")
+                                .withTitle ("KJNG-2 updates")
                                 .withMessage (msg)
                                 .withButton ("Check now").withButton (u.autoCheck() ? "Turn automatic check off" : "Turn automatic check on").withButton ("Close")
                                 .withAssociatedComponent (this),

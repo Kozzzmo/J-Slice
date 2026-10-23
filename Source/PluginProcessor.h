@@ -106,7 +106,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "J-Slice"; }
+    const juce::String getName() const override { return "KJNG-2"; }   // ex J-Slice (internal ids unchanged)
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
@@ -171,6 +171,7 @@ public:
     void copySlot();
     void pasteSlot();
     void clearSlot();
+    void resetKeepBreak();            // RESET: every setting and pattern back to default; the break and its slices stay
     bool hasSlotClip() const          { return slotClip != nullptr; }
     const std::vector<ChainItem>& getChain() const { return chain; }
     void setChain (std::vector<ChainItem> c);
