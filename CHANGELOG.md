@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.3
+
+- New Kinetik logo: the "Orbit" mark, in every skin, with a larger product name
+
 ## 1.3.2
 
 - Safer project loading: slices outside the audio, an invalid tempo or bar count, an oversized embedded break or a

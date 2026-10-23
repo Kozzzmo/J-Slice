@@ -402,23 +402,21 @@ void JSliceEditor::paint (juce::Graphics& g)
     const auto& pl = pal();
     g.fillAll (pl.bg);
 
-    // logo
-    g.setFont (serifItalic (52.0f));
+    // logo: the Kinetik "Orbit" mark + the product name
+    drawOrbitMark (g, { 14.0f, 8.0f, 46.0f, 46.0f });
+    g.setFont (logoFont (30.0f));
     g.setColour (pl.text);
-    g.drawText ("J-Slice", 16, 2, 170, 56, Justification::centredLeft);
-    drawStar (g, { 176.0f, 16.0f }, 7.0f, pl.hot);
-    g.setFont (mono (13.0f, true, 0.22f));
-    g.drawText ("JSLC-16", 196, 14, 130, 18, Justification::centredLeft);
+    g.drawText ("J-SLICE", 68, 6, 240, 34, Justification::centredLeft);
     g.setFont (mono (9.5f, true, 0.02f));
     if (proc.updates().getState() == upd::Checker::available)
     {
         g.setColour (pl.hot);
-        g.drawText ("UPDATE " + String (proc.updates().manifest().version) + " - CLICK", 196, 34, 200, 14, Justification::centredLeft);
+        g.drawText ("UPDATE " + String (proc.updates().manifest().version) + " - CLICK", 69, 39, 240, 14, Justification::centredLeft);
     }
     else
     {
         g.setColour (pl.dim);
-        g.drawText ("BREAK SLICER / GENERATOR", 196, 34, 130, 14, Justification::centredLeft);
+        g.drawText ("KINETIK  BREAK SLICER", 69, 39, 240, 14, Justification::centredLeft);
     }
 
     drawPanel (g, { 8, 66, kW - 16, 222 });

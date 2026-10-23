@@ -29,6 +29,7 @@ namespace
         neon.snare    = C (0xffff8cc8);
         neon.hat      = C (0xff7fe2d2);
         neon.ghost    = C (0xff8e7ff2);
+        neon.markBadge = C (0xffe4202f); neon.markInk = C (0xff0b0e27); neon.markSat = C (0xffffffff); neon.markGlow = true;
         s.push_back (neon);
 
         Palette mid;
@@ -49,6 +50,7 @@ namespace
         mid.snare    = C (0xfff2a44f);
         mid.hat      = C (0xff6fc7b8);
         mid.ghost    = C (0xffb9a8e6);
+        mid.markBadge = C (0xffde262c); mid.markInk = C (0xff232946); mid.markSat = C (0xffefe8d6);
         s.push_back (mid);
 
         Palette amen;   // the original J-Slice look, kept as an option
@@ -69,6 +71,7 @@ namespace
         amen.snare    = C (0xffffc933);
         amen.hat      = C (0xff4fd3c4);
         amen.ghost    = C (0xffa58bff);
+        amen.markBadge = C (0xffe4202f); amen.markInk = C (0xff1f1e1b); amen.markSat = C (0xffece4cd);
         s.push_back (amen);
         return s;
     }
@@ -83,13 +86,14 @@ namespace
 
     struct Fonts
     {
-        juce::Typeface::Ptr serif, serifItalic, monoMedium, monoBold;
+        juce::Typeface::Ptr serif, serifItalic, monoMedium, monoBold, logo;
         Fonts()
         {
             serif       = juce::Typeface::createSystemTypefaceFor (BinaryData::InstrumentSerifRegular_ttf, BinaryData::InstrumentSerifRegular_ttfSize);
             serifItalic = juce::Typeface::createSystemTypefaceFor (BinaryData::InstrumentSerifItalic_ttf, BinaryData::InstrumentSerifItalic_ttfSize);
             monoMedium  = juce::Typeface::createSystemTypefaceFor (BinaryData::IBMPlexMonoMedium_ttf, BinaryData::IBMPlexMonoMedium_ttfSize);
             monoBold    = juce::Typeface::createSystemTypefaceFor (BinaryData::IBMPlexMonoSemiBold_ttf, BinaryData::IBMPlexMonoSemiBold_ttfSize);
+            logo        = juce::Typeface::createSystemTypefaceFor (BinaryData::UnboundedBold_ttf, BinaryData::UnboundedBold_ttfSize);
         }
     };
 
@@ -107,6 +111,7 @@ const Palette& pal()      { return skins()[(size_t) currentSkin]; }
 
 juce::Font serif (float h)        { return juce::Font (juce::FontOptions (fonts().serif).withHeight (h)); }
 juce::Font serifItalic (float h)  { return juce::Font (juce::FontOptions (fonts().serifItalic).withHeight (h)); }
+juce::Font logoFont (float h)     { return juce::Font (juce::FontOptions (fonts().logo).withHeight (h)); }
 juce::Font mono (float h, bool bold, float tracking)
 {
     return juce::Font (juce::FontOptions (bold ? fonts().monoBold : fonts().monoMedium).withHeight (h).withKerningFactor (tracking));
@@ -125,6 +130,24 @@ void drawPanel (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& t
         g.setColour (pal().dim);
         g.drawText (title.toUpperCase(), r.getX() + 12, r.getY() + 6, r.getWidth() - 24, 14, juce::Justification::centredLeft);
     }
+}
+
+void drawOrbitMark (juce::Graphics& g, juce::Rectangle<float> box)
+{
+    // same geometry as the other Kinetik products, in a 120-unit box
+    const auto& pl = pal();
+    const float u = box.getWidth() / 120.0f;
+    auto at = [&] (float x, float y) { return juce::Point<float> (box.getX() + x * u, box.getY() + y * u); };
+    const auto sq = juce::Rectangle<float> (at (6, 6), at (114, 114));
+    if (pl.markGlow)
+        juce::DropShadow (pl.markBadge.withAlpha (0.55f), (int) (22 * u), {}).drawForRectangle (g, sq.toNearestInt());
+    g.setColour (pl.markBadge);
+    g.fillRoundedRectangle (sq, 26 * u);
+    g.setColour (pl.markInk);
+    g.drawEllipse (juce::Rectangle<float> (60 * u, 60 * u).withCentre (at (60, 60)), 9 * u);
+    g.fillEllipse (juce::Rectangle<float> (22 * u, 22 * u).withCentre (at (60, 60)));
+    g.setColour (pl.markSat);
+    g.fillEllipse (juce::Rectangle<float> (20 * u, 20 * u).withCentre (at (84, 38)));
 }
 
 void drawStar (juce::Graphics& g, juce::Point<float> c, float r, juce::Colour col)

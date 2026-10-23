@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(J_SLICE VERSION 1.3.2 LANGUAGES C CXX)
+project(J_SLICE VERSION 1.3.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -86,7 +86,8 @@ juce_add_binary_data(JSliceFonts SOURCES
     Resources/Fonts/InstrumentSerif-Regular.ttf
     Resources/Fonts/InstrumentSerif-Italic.ttf
     Resources/Fonts/IBMPlexMono-Medium.ttf
-    Resources/Fonts/IBMPlexMono-SemiBold.ttf)
+    Resources/Fonts/IBMPlexMono-SemiBold.ttf
+    Resources/Fonts/Unbounded-Bold.ttf)
 set_target_properties(JSliceFonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_definitions(JSlice PUBLIC ${COMMON_DEFINITIONS})
 

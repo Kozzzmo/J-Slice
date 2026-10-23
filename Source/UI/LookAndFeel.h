@@ -23,6 +23,8 @@ namespace ui
         juce::Colour active;    // knob being edited, record-like highlights
         juce::Colour hot;       // alerts, important toggles
         juce::Colour kick, snare, hat, ghost;
+        juce::Colour markBadge, markInk, markSat;   // Kinetik "Orbit" mark
+        bool markGlow = false;
     };
 
     int numSkins();
@@ -47,12 +49,16 @@ namespace ui
     juce::Font serif (float h);
     juce::Font serifItalic (float h);
     juce::Font mono (float h, bool bold = true, float tracking = 0.12f);
+    juce::Font logoFont (float h);   // Unbounded Bold (logo, product name), SIL OFL
 
     /** Section background with a thin outline, like the hardware-style panels of Kinetik. */
     void drawPanel (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& title = {});
 
-    /** Small 4-point star used next to the logo. */
+    /** Small 4-point star (no longer used by the logo). */
     void drawStar (juce::Graphics& g, juce::Point<float> c, float r, juce::Colour col);
+
+    /** The Kinetik "Orbit" mark in the skin's colours: rounded square, ring + core, satellite. `box` is square. */
+    void drawOrbitMark (juce::Graphics& g, juce::Rectangle<float> box);
 
     //==============================================================================
     class LookAndFeel : public juce::LookAndFeel_V4

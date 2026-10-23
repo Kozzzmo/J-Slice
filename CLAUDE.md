@@ -19,8 +19,8 @@ licence (free "Starter" tier up to USD 20k revenue a year).
   Claude attribution** in commits, PRs or files — the owner asked explicitly (history was rewritten to remove them).
 - The code is **proprietary** (see `LICENSE`). Third-party code is allowed only under a permissive licence and must be
   listed in `THIRD_PARTY_NOTICES.txt`, which ships with every release.
-- Product family: Kinetik (KDSP-16, KMSP-6, J-Slice, KDYN-10). Shared look: serif italic "Kinetik" logo + four-point
-  star, skins NEON (default) / MIDNIGHT / RISO / CLASSIC, Instrument Serif + IBM Plex Mono + Archivo Black (OFL).
+- Product family: Kinetik (KDSP-16, KMSP-6, J-Slice, KDYN-10). Shared look: the Kinetik "Orbit" logo mark + product name in
+  Unbounded Bold, skins NEON (default) / MIDNIGHT / RISO / CLASSIC, Instrument Serif + IBM Plex Mono + Archivo Black + Unbounded (OFL).
 - The 2.0.0 work (Kinetik Jungle KJNG-2 : second break, lanes + inspector, zone faders, palet knobs) was set
   aside on the branch `kjng-2` at the owner's request ; `main` is back to 1.3.1.
 - Launch tracker (claude.ai artifact, tasks in its db collection `tasks`):
@@ -36,3 +36,6 @@ licence (free "Starter" tier up to USD 20k revenue a year).
   the Kinetik update key (same format as KDSP-16 / KMSP-6, Monocypher in `Source/third_party`). No installer: the
   logo click dialog opens the release page. The release job signs it with `tools/sign_update.py --tag latest` when
   the secret `KINETIK_UPDATE_KEY` exists. JUCE has no HTTPS on Linux here (`JUCE_USE_CURL=0`): the check fails there.
+
+- Logo (1.3.3): the Kinetik "Orbit" mark (`ui::drawOrbitMark`, colours = `Palette::markBadge/markInk/markSat`) + the
+  product name in Unbounded Bold (`ui::logoFont`, `Resources/Fonts/Unbounded-Bold.ttf`, ASCII subset, OFL). The star is no longer used.
